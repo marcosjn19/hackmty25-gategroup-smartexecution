@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 import os
+import base64
 from app.db.models import SessionLocal
 from app.db.repositories import ModelRepository, SampleRepository
 from app.utils.errors import APIError
@@ -89,6 +90,7 @@ def list_samples_by_model():
     page = int(data.get('page', 1) or 1)
     limit = int(data.get('limit', 20) or 20)
     label = data.get('label')  # optional: 'positive' or 'negative'
+    embed = bool(data.get('embed', False))
 
     if page < 1:
         page = 1
@@ -115,8 +117,22 @@ def list_samples_by_model():
             except Exception:
                 return fp
 
-        results = [
-            {
+        # Helper to compute absolute path for stored file_path
+        def to_abs(fp: str) -> str:
+            if not fp:
+                return ''
+            fp_norm = fp.replace('/', os.sep)
+            if os.path.isabs(fp_norm):
+                return os.path.normpath(fp_norm)
+            return os.path.normpath(os.path.join(storage_root, fp_norm))
+
+        # Max embed size (MB)
+        max_embed_mb = int(current_app.config.get('MAX_EMBED_SIZE_MB', 5))
+        max_embed_bytes = max_embed_mb * 1024 * 1024
+
+        results = []
+        for s in items:
+            item = {
                 'id': s.id,
                 'type': s.label,
                 'original_filename': s.original_filename,
@@ -125,8 +141,29 @@ def list_samples_by_model():
                 'created_at': s.created_at.isoformat() if s.created_at else None,
                 'path': to_rel(s.file_path)
             }
-            for s in items
-        ]
+
+            if embed:
+                try:
+                    abs_p = to_abs(s.file_path)
+                    if os.path.isfile(abs_p):
+                        size = os.path.getsize(abs_p)
+                        if size <= max_embed_bytes:
+                            with open(abs_p, 'rb') as f:
+                                b = f.read()
+                            b64 = base64.b64encode(b).decode('ascii')
+                            # Provide a data URI so clients can set directly to <img.src>
+                            item['data_uri'] = f"data:{s.mime_type};base64,{b64}"
+                        else:
+                            item['embed_skipped'] = True
+                            item['embed_reason'] = f"size {size} bytes exceeds max {max_embed_bytes} bytes"
+                    else:
+                        item['embed_skipped'] = True
+                        item['embed_reason'] = 'file not found on server'
+                except Exception as exc:
+                    item['embed_skipped'] = True
+                    item['embed_reason'] = f'error reading file: {str(exc)}'
+
+            results.append(item)
 
         return jsonify({
             'uuid': model_uuid,
