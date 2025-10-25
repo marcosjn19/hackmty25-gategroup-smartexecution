@@ -107,19 +107,20 @@ class VoiceTranscriptionService
      */
     protected function buildTranscriptionImprovementPrompt(string $transcription): string
     {
-        return "Por favor, mejora la siguiente transcripción de voz corrigiendo errores de ortografía, puntuación y gramática, pero manteniendo el significado original exacto. 
+        return "Please improve the following voice transcription by correcting spelling errors, punctuation and grammar, while maintaining the exact original meaning. 
 
-Reglas importantes:
-- No cambies el sentido ni añadas información nueva
-- Corrige solo errores evidentes de transcripción automática
-- Mantén el estilo coloquial si es apropiado
-- Agrega puntuación correcta
-- Si no hay errores evidentes, devuelve el texto original
+Important rules:
+- Do not change the meaning or add new information
+- Correct only obvious errors from automatic transcription
+- Maintain colloquial style if appropriate
+- Add correct punctuation
+- If there are no obvious errors, return the original text
+- ALWAYS respond in English, regardless of the input language
 
-Transcripción original:
+Original transcription:
 \"$transcription\"
 
-Transcripción mejorada:";
+Improved transcription:";
     }
 
     /**

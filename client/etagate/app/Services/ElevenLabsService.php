@@ -16,8 +16,8 @@ class ElevenLabsService
     {
         $this->apiKey = config('services.elevenlabs.api_key') ?? env('ELEVENLABS_API_KEY');
         $this->baseUrl = 'https://api.elevenlabs.io/v1';
-        // Voice ID por defecto (Rachel - voz femenina en inglés/español)
-        $this->voiceId = config('services.elevenlabs.voice_id') ?? 'flq6f7yk4E4fJM5XTYuZ';
+        // Voice ID para una voz rápida en inglés (Adam - voz masculina clara en inglés)
+        $this->voiceId = config('services.elevenlabs.voice_id') ?? 'pNInz6obpgDQGcFmaJgB';
     }
 
     /**
@@ -25,11 +25,21 @@ class ElevenLabsService
      */
     public function generateSpeech(string $text): ?string
     {
+        return $this->generateSpeechWithSettings($text, $this->getEnglishVoiceSettings());
+    }
+
+    /**
+     * Genera síntesis de voz con configuraciones personalizadas
+     */
+    public function generateSpeechWithSettings(string $text, array $voiceSettings = null): ?string
+    {
         try {
             if (empty($this->apiKey)) {
                 Log::error('ElevenLabs API key no configurada');
                 return null;
             }
+
+            $settings = $voiceSettings ?? $this->getFastVoiceSettings();
 
             $response = Http::timeout(30)
                 ->withHeaders([
@@ -39,13 +49,8 @@ class ElevenLabsService
                 ])
                 ->post("{$this->baseUrl}/text-to-speech/{$this->voiceId}", [
                     'text' => $text,
-                    'model_id' => 'eleven_multilingual_v2', // Soporte para español
-                    'voice_settings' => [
-                        'stability' => 0.5,
-                        'similarity_boost' => 0.8,
-                        'style' => 0.0,
-                        'use_speaker_boost' => true
-                    ]
+                    'model_id' => 'eleven_turbo_v2_5', // Modelo más rápido para inglés
+                    'voice_settings' => $settings
                 ]);
 
             if (!$response->successful()) {
@@ -162,14 +167,40 @@ class ElevenLabsService
     }
 
     /**
-     * Configuración optimizada para voces en español
+     * Configuración para voz más rápida y fluida
+     */
+    public function getFastVoiceSettings(): array
+    {
+        return [
+            'stability' => 0.2,           // Estabilidad muy baja para máxima velocidad
+            'similarity_boost' => 0.5,    // Boost bajo para permitir mayor variación
+            'style' => 0.6,               // Estilo alto para máxima fluidez
+            'use_speaker_boost' => true
+        ];
+    }
+
+    /**
+     * Configuración optimizada para voces en español con mayor fluidez
      */
     public function getSpanishVoiceSettings(): array
     {
         return [
-            'stability' => 0.6,
-            'similarity_boost' => 0.9,
-            'style' => 0.2,
+            'stability' => 0.4,           // Menor estabilidad para más dinamismo
+            'similarity_boost' => 0.7,    // Permitir más variación natural
+            'style' => 0.3,               // Mayor expresividad y fluidez
+            'use_speaker_boost' => true
+        ];
+    }
+
+    /**
+     * Configuración optimizada para voces en inglés con máxima velocidad
+     */
+    public function getEnglishVoiceSettings(): array
+    {
+        return [
+            'stability' => 0.1,           // Estabilidad mínima para máxima velocidad
+            'similarity_boost' => 0.4,    // Boost muy bajo para naturalidad
+            'style' => 0.8,               // Estilo máximo para fluidez extrema
             'use_speaker_boost' => true
         ];
     }
