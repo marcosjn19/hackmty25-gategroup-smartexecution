@@ -136,40 +136,125 @@ class TrainingService:
         return X, y, n_pos, n_neg
 
     @staticmethod
-    def _train_svm(X: np.ndarray, y: np.ndarray):
-        """Entrena SVM lineal; calcula accuracy con holdout 80/20 si hay muestras."""
+    def _train_svm(
+        X: np.ndarray,
+        y: np.ndarray,
+        rng_seed: int = 42,
+        train_ratio: float = 0.8,
+        balance_train: bool = True,
+    ):
+        """
+        - Split 80/20 ESTRATIFICADO por clase.
+        - Opcional: balancea el TRAIN a 1:1 (downsampling de la mayoritaria).
+        - Métricas: accuracy, precision/recall/F1 (clase positiva=1), matriz de confusión.
+        """
+        n = len(X)
+        # Fallback por dataset minúsculo o 1 sola clase (no debería suceder por checks previos)
+        if n < 2 or len(np.unique(y)) < 2:
+            svm = cv2.ml.SVM_create()
+            svm.setType(cv2.ml.SVM_C_SVC)
+            svm.setKernel(cv2.ml.SVM_LINEAR)
+            svm.setC(1.0)
+            svm.train(X, cv2.ml.ROW_SAMPLE, y)
+            metrics = {
+                "algo": "opencv_svm_linear_hog64",
+                "accuracy": 1.0,
+                "precision_pos": 1.0,
+                "recall_pos": 1.0,
+                "f1_pos": 1.0,
+                "n_train": int(len(y)),
+                "n_test": 0,
+                "n_features": int(X.shape[1]) if X.ndim == 2 else 0,
+                "class_dist": {"train": {"pos": int(np.sum(y == 1)), "neg": int(np.sum(y == 0))},
+                            "test": {"pos": 0, "neg": 0}},
+                "confusion_matrix": {"tp": 0, "tn": 0, "fp": 0, "fn": 0},
+                "stratified_split": False,
+                "balanced_train": False,
+                "train_ratio": float(train_ratio),
+                "rng_seed": int(rng_seed),
+            }
+            return svm, metrics
+
+        rng = np.random.default_rng(rng_seed)
+
+        # --- índices por clase ---
+        pos_idx = np.where(y == 1)[0]
+        neg_idx = np.where(y == 0)[0]
+        rng.shuffle(pos_idx)
+        rng.shuffle(neg_idx)
+
+        # --- split estratificado 80/20 ---
+        sp_pos = int(train_ratio * len(pos_idx))
+        sp_neg = int(train_ratio * len(neg_idx))
+
+        train_pos = pos_idx[:sp_pos]
+        train_neg = neg_idx[:sp_neg]
+        test_pos  = pos_idx[sp_pos:]
+        test_neg  = neg_idx[sp_neg:]
+
+        # --- balanceo 1:1 en TRAIN (downsample de la mayoritaria) ---
+        if balance_train:
+            n_min = min(len(train_pos), len(train_neg))
+            if len(train_pos) > n_min:
+                train_pos = rng.choice(train_pos, size=n_min, replace=False)
+            if len(train_neg) > n_min:
+                train_neg = rng.choice(train_neg, size=n_min, replace=False)
+
+        train_idx = np.concatenate([train_pos, train_neg])
+        test_idx  = np.concatenate([test_pos, test_neg])
+        rng.shuffle(train_idx)
+        rng.shuffle(test_idx)
+
+        Xtr, ytr = X[train_idx], y[train_idx]
+        Xte, yte = X[test_idx], y[test_idx]
+
+        # --- SVM lineal ---
         svm = cv2.ml.SVM_create()
         svm.setType(cv2.ml.SVM_C_SVC)
         svm.setKernel(cv2.ml.SVM_LINEAR)
         svm.setC(1.0)
+        svm.train(Xtr, cv2.ml.ROW_SAMPLE, ytr)
 
-        n = len(X)
-        idx = np.arange(n)
-        np.random.shuffle(idx)
-
-        if n >= 10:
-            split = int(0.8 * n)
-            train_idx, test_idx = idx[:split], idx[split:]
-            Xtr, ytr = X[train_idx], y[train_idx]
-            Xte, yte = X[test_idx], y[test_idx]
-            svm.train(Xtr, cv2.ml.ROW_SAMPLE, ytr)
+        # --- Métricas ---
+        if len(yte):
             _, pred = svm.predict(Xte)
             pred = pred.reshape(-1).astype(np.int32)
-            acc = float((pred == yte).mean()) if len(yte) else 1.0
-            n_train, n_test = len(ytr), len(yte)
+
+            acc = float((pred == yte).mean())
+            tp = int(np.sum((pred == 1) & (yte == 1)))
+            tn = int(np.sum((pred == 0) & (yte == 0)))
+            fp = int(np.sum((pred == 1) & (yte == 0)))
+            fn = int(np.sum((pred == 0) & (yte == 1)))
+
+            prec = float(tp / (tp + fp)) if (tp + fp) else 0.0
+            rec  = float(tp / (tp + fn)) if (tp + fn) else 0.0
+            f1   = float(2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0
         else:
-            svm.train(X, cv2.ml.ROW_SAMPLE, y)
             acc = 1.0
-            n_train, n_test = len(X), 0
+            tp = tn = fp = fn = 0
+            prec = rec = f1 = 1.0
 
         metrics = {
             "algo": "opencv_svm_linear_hog64",
             "accuracy": round(acc, 4),
-            "n_train": n_train,
-            "n_test": n_test,
+            "precision_pos": round(prec, 4),
+            "recall_pos": round(rec, 4),
+            "f1_pos": round(f1, 4),
+            "n_train": int(len(ytr)),
+            "n_test": int(len(yte)),
             "n_features": int(X.shape[1]) if X.ndim == 2 else 0,
+            "class_dist": {
+                "train": {"pos": int(np.sum(ytr == 1)), "neg": int(np.sum(ytr == 0))},
+                "test":  {"pos": int(np.sum(yte == 1)), "neg": int(np.sum(yte == 0))},
+            },
+            "confusion_matrix": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+            "stratified_split": True,
+            "balanced_train": bool(balance_train),
+            "train_ratio": float(train_ratio),
+            "rng_seed": int(rng_seed),
         }
         return svm, metrics
+
 
     @staticmethod
     def start_training(model_uuid: str):

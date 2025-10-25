@@ -2,7 +2,7 @@
 import os
 import json
 import math
-from typing import Tuple
+from typing import Tuple, Dict, Any
 
 import cv2
 import numpy as np
@@ -39,7 +39,8 @@ class InferenceService:
     Usa el SVM lineal entrenado con HOG (64x64).
     Cachea el modelo por UUID.
     """
-    _cache: dict[str, Tuple[cv2.ml_SVM, cv2.HOGDescriptor, float]] = {}
+    # Guardamos (svm, hog, decision_threshold, calibration_dict)
+    _cache: dict[str, Tuple[cv2.ml_SVM, cv2.HOGDescriptor, float, Dict[str, Any]]] = {}
 
     DEFAULT_HOG = {
         "win_size": (64, 64),
@@ -48,7 +49,11 @@ class InferenceService:
         "cell_size": (8, 8),
         "bins": 9,
     }
-    DEFAULT_TEMPERATURE = 1.5  # para sigmoide
+
+    # Mejor default para binario balanceado
+    DEFAULT_DECISION_THRESHOLD = 0.5
+    # Fallback de "calibración suave" si no hay parámetros
+    DEFAULT_TEMPERATURE = 1.5
 
     @staticmethod
     def _build_hog(meta: dict | None) -> cv2.HOGDescriptor:
@@ -64,7 +69,7 @@ class InferenceService:
     def _load_artifacts(model_uuid: str):
         """
         Carga (y cachea) SVM + HOG para el modelo.
-        Devuelve (svm, hog, model_threshold).
+        Devuelve (svm, hog, decision_threshold, calibration_dict).
         """
         if model_uuid in InferenceService._cache:
             return InferenceService._cache[model_uuid]
@@ -96,10 +101,33 @@ class InferenceService:
 
             svm = cv2.ml.SVM_load(xml_path_abs)
             hog = InferenceService._build_hog(meta)
-            model_threshold = float(model.threshold or 0.8)
 
-            InferenceService._cache[model_uuid] = (svm, hog, model_threshold)
-            return svm, hog, model_threshold
+            # 1) Threshold de decisión:
+            #    prioridad: meta.decision_threshold -> model.threshold -> default
+            decision_threshold = None
+            if isinstance(meta, dict):
+                decision_threshold = meta.get("decision_threshold")
+            if decision_threshold is None:
+                decision_threshold = (
+                    float(model.threshold)
+                    if model.threshold is not None
+                    else InferenceService.DEFAULT_DECISION_THRESHOLD
+                )
+            else:
+                decision_threshold = float(decision_threshold)
+
+            # 2) Parámetros de calibración (opcional)
+            #    ejemplo en meta.json:
+            #    "calibration": {"type":"platt","A":-1.23,"B":0.45}
+            #    o "calibration": {"type":"temperature","t":1.5}
+            calibration: Dict[str, Any] = {}
+            if isinstance(meta, dict):
+                cal = meta.get("calibration")
+                if isinstance(cal, dict):
+                    calibration = cal
+
+            InferenceService._cache[model_uuid] = (svm, hog, decision_threshold, calibration)
+            return svm, hog, decision_threshold, calibration
         finally:
             session.close()
 
@@ -130,17 +158,16 @@ class InferenceService:
         storage_root = os.getenv("STORAGE_ROOT", "./storage")
         image_abs = resolve_storage_path(storage_root, image_path)
 
-        svm, hog, model_threshold = InferenceService._load_artifacts(model_uuid)
-        thr = float(threshold if threshold is not None else model_threshold)
-        temperature = InferenceService.DEFAULT_TEMPERATURE
+        svm, hog, default_thr, calibration = InferenceService._load_artifacts(model_uuid)
+        thr = float(threshold if threshold is not None else default_thr)
 
         feat = InferenceService._featurize(hog, image_abs)
 
-        # Etiqueta 0/1
+        # Etiqueta 0/1 (por compatibilidad y fallback)
         _ret, labels = svm.predict(feat)
         label = int(labels.ravel()[0])
 
-        # Distancia al hiperplano (si está disponible)
+        # Distancia al hiperplano (raw score). Si no está disponible, fallback con el label.
         RAW = getattr(cv2.ml, "STAT_MODEL_RAW_OUTPUT", 1)
         try:
             _ret2, raw = svm.predict(feat, flags=RAW)
@@ -148,8 +175,22 @@ class InferenceService:
         except Exception:
             dist = 1.0 if label == 1 else -1.0
 
-        # Probabilidad de clase positiva
-        p_pos = InferenceService._sigmoid(dist, temperature)
+        # --- Calibración a probabilidad de clase positiva ---
+        # 1) Platt: p = 1 / (1 + exp(A*dist + B))
+        ctype = (calibration.get("type") if isinstance(calibration, dict) else None)
+        if ctype == "platt":
+            A = float(calibration.get("A", 0.0))
+            B = float(calibration.get("B", 0.0))
+            p_pos = 1.0 / (1.0 + math.exp(A * dist + B))
+        elif ctype == "temperature":
+            # 2) Temperature scaling: p = sigmoid(dist / t)
+            t = float(calibration.get("t", InferenceService.DEFAULT_TEMPERATURE))
+            t = max(1e-6, t)
+            p_pos = 1.0 / (1.0 + math.exp(-dist / t))
+        else:
+            # Fallback histórico (sigmoide con temperature por defecto)
+            t = InferenceService.DEFAULT_TEMPERATURE
+            p_pos = 1.0 / (1.0 + math.exp(-dist / t))
 
         approved = p_pos >= thr
         confidence = p_pos if approved else (1.0 - p_pos)
