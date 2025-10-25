@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
+import os
 from app.db.models import SessionLocal
 from app.db.repositories import ModelRepository, SampleRepository
 from app.utils.errors import APIError
@@ -49,7 +50,7 @@ def upload_sample():
             return jsonify({
                 'sample_id': existing_sample.id,
                 'path': existing_sample.file_path,
-                'label': existing_sample.label,
+                'type': existing_sample.label,
                 'message': 'Sample already exists (deduplicated)'
             }), 201
         
@@ -65,7 +66,74 @@ def upload_sample():
         return jsonify({
             'sample_id': sample.id,
             'path': sample.file_path,
-            'label': sample.label
+            'type': sample.label
         }), 201
+    finally:
+        db.close()
+
+
+@samples_bp.route('/list', methods=['POST'])
+def list_samples_by_model():
+    """Return paginated list of samples for a model.
+
+    Expects JSON body: { "uuid": "<model_uuid>", "page": 1, "limit": 20, "label": "positive" }
+    """
+    data = request.get_json()
+    if not data:
+        raise APIError('Invalid JSON', 400)
+
+    model_uuid = data.get('uuid')
+    if not model_uuid:
+        raise APIError('UUID is required', 400, {'field': 'uuid'})
+
+    page = int(data.get('page', 1) or 1)
+    limit = int(data.get('limit', 20) or 20)
+    label = data.get('label')  # optional: 'positive' or 'negative'
+
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 200:
+        limit = 20
+
+    db = SessionLocal()
+    try:
+        model = ModelRepository.get_by_uuid(db, model_uuid)
+        if not model:
+            raise APIError('Model not found', 404, {'uuid': model_uuid})
+
+        items, total = SampleRepository.list_by_model(db, model_uuid, page, limit, label)
+
+        storage_root = current_app.config.get('STORAGE_ROOT', './storage')
+
+        def to_rel(fp: str) -> str:
+            try:
+                fp_norm = os.path.normpath(fp)
+                sr = os.path.normpath(storage_root)
+                if os.path.isabs(fp_norm) and fp_norm.startswith(sr):
+                    return os.path.relpath(fp_norm, sr).replace('\\', '/')
+                return fp.replace('\\', '/')
+            except Exception:
+                return fp
+
+        results = [
+            {
+                'id': s.id,
+                'type': s.label,
+                'original_filename': s.original_filename,
+                'mime_type': s.mime_type,
+                'size_bytes': int(s.size_bytes) if s.size_bytes is not None else None,
+                'created_at': s.created_at.isoformat() if s.created_at else None,
+                'path': to_rel(s.file_path)
+            }
+            for s in items
+        ]
+
+        return jsonify({
+            'uuid': model_uuid,
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'items': results
+        }), 200
     finally:
         db.close()

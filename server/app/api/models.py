@@ -104,14 +104,17 @@ def train_model():
         db.close()
 
 
-@models_bp.route('/counts', methods=['GET'])
+@models_bp.route('/counts', methods=['POST'])
 def get_model_counts():
     """Returns number of positive and negative samples for a given model UUID.
 
-    Query param: uuid
+    Expects JSON body: { "uuid": "<model_uuid>" }
     """
-    model_uuid = request.args.get('uuid')
+    data = request.get_json()
+    if not data:
+        raise APIError('Invalid JSON', 400)
 
+    model_uuid = data.get('uuid')
     if not model_uuid:
         raise APIError('UUID is required', 400, {'field': 'uuid'})
 
