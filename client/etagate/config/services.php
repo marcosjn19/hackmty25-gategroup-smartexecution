@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+        'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+    ],
+
+    'elevenlabs' => [
+        'api_key' => env('ELEVENLABS_API_KEY'),
+        'base_url' => env('ELEVENLABS_BASE_URL', 'https://api.elevenlabs.io/v1'),
+        'voice_id' => env('ELEVENLABS_VOICE_ID', 'flq6f7yk4E4fJM5XTYuZ'), // Rachel - voz femenina multiidioma
+    ],
+
 ];
