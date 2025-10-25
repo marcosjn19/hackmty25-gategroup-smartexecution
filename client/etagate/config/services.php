@@ -35,4 +35,7 @@ return [
         ],
     ],
 
+    'flask' => [
+        'base_url' => env('FLASK_BASE_URL', 'https://9bfcb5fd3633.ngrok-free.app/'),
+    ],
 ];
