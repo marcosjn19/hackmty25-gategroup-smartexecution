@@ -13,17 +13,65 @@ from app.db.models import SessionLocal, Model, Sample, TrainingJob
 from app.db.repositories import ModelRepository, TrainingJobRepository
 
 
+# ---------------------- UTIL RUTAS (Windows-friendly) ---------------------- #
+def resolve_storage_path(storage_root: str, path_str: str) -> str:
+    """
+    Normaliza una ruta que puede venir con:
+      - backslashes (\) o barras (/)
+      - segmentos redundantes como '.' o prefijos duplicados 'storage/...'
+      - rutas relativas con './'
+    Devuelve una ruta ABSOLUTA válida en el SO actual.
+    """
+    if not path_str:
+        raise FileNotFoundError("Ruta vacía")
+
+    storage_root = os.path.normpath(storage_root)
+
+    # 1) Normaliza lo que venga del DB (resuelve '.','..' y separadores)
+    p0 = os.path.normpath(path_str)
+
+    # 2) Si ya es absoluta, simplemente normaliza y regresa
+    if os.path.isabs(p0):
+        return os.path.normpath(p0)
+
+    # 3) Trabajemos con componentes 'posix' para limpiar prefijos
+    #    (convertimos a '/', separamos y removemos '.' vacíos)
+    p_posix = p0.replace("\\", "/")
+    parts = [seg for seg in p_posix.split("/") if seg and seg != "."]
+
+    # 4) Elimina prefijos tipo 'storage' o el basename de storage_root repetido
+    storage_name = os.path.basename(storage_root).replace("\\", "/").lower()
+    while parts and parts[0].lower() in ("storage", storage_name):
+        parts.pop(0)
+
+    rel = "/".join(parts)  # mantenemos POSIX en DB
+    # 5) Une con storage_root y normaliza a separadores del SO
+    abs_path = os.path.normpath(os.path.join(storage_root, rel))
+    return abs_path
+
+
+def to_rel_storage_path(storage_root: str, abs_path: str) -> str:
+    """
+    Convierte una absoluta -> relativa (POSIX) respecto a storage_root.
+    Útil para guardar en DB sin backslashes.
+    """
+    storage_root = os.path.normpath(storage_root)
+    ap = os.path.normpath(abs_path)
+    rel = os.path.relpath(ap, storage_root).replace("\\", "/")
+    return rel
+# -------------------------------------------------------------------------- #
+
+
 class TrainingService:
     """
-    Entrena un modelo binario (positive/negative) usando OpenCV:
-      - Extractor: HOG sobre imágenes 64x64 en escala de grises
-      - Clasificador: SVM lineal (cv2.ml.SVM)
+    Entrena un modelo binario (positive/negative) con OpenCV:
+      - HOG 64x64 gris
+      - SVM lineal
     Artefactos:
       - <STORAGE_ROOT>/models/<uuid>/artifacts/svm_hog.xml
       - <STORAGE_ROOT>/models/<uuid>/artifacts/meta.json
     """
 
-    # Parámetros HOG (ligeros)
     HOG_WIN_SIZE = (64, 64)
     HOG_BLOCK_SIZE = (16, 16)
     HOG_BLOCK_STRIDE = (8, 8)
@@ -49,12 +97,12 @@ class TrainingService:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         resized = cv2.resize(gray, TrainingService.HOG_WIN_SIZE, interpolation=cv2.INTER_AREA)
         hog = TrainingService._hog_descriptor()
-        feat = hog.compute(resized)  # shape (N,1)
+        feat = hog.compute(resized)  # (N,1)
         return feat.reshape(-1).astype(np.float32)
 
     @staticmethod
     def _load_dataset(db, model_uuid: str, storage_root: str):
-        """Lee samples de la BD y construye X, y."""
+        """Lee samples de la BD y construye X, y con rutas normalizadas."""
         samples = (
             db.query(Sample)
             .filter(Sample.model_uuid == model_uuid)
@@ -64,11 +112,13 @@ class TrainingService:
 
         X, y = [], []
         n_pos, n_neg = 0, 0
+
         for s in samples:
-            abs_path = os.path.join(storage_root, s.file_path)
+            abs_path = resolve_storage_path(storage_root, s.file_path)
             feat = TrainingService._extract_feature(abs_path)
             if feat is None:
-                continue  # archivo faltante o ilegible
+                # archivo faltante o ilegible
+                continue
             X.append(feat)
             if s.label == 'positive':
                 y.append(1)
@@ -77,17 +127,22 @@ class TrainingService:
                 y.append(0)
                 n_neg += 1
 
-        return np.array(X, dtype=np.float32), np.array(y, dtype=np.int32), n_pos, n_neg
+        if len(X) and isinstance(X[0], np.ndarray):
+            X = np.vstack(X).astype(np.float32)
+        else:
+            X = np.array([], dtype=np.float32)
+
+        y = np.array(y, dtype=np.int32)
+        return X, y, n_pos, n_neg
 
     @staticmethod
     def _train_svm(X: np.ndarray, y: np.ndarray):
-        """Entrena SVM lineal; devuelve modelo y métrica simple (accuracy holdout)."""
+        """Entrena SVM lineal; calcula accuracy con holdout 80/20 si hay muestras."""
         svm = cv2.ml.SVM_create()
         svm.setType(cv2.ml.SVM_C_SVC)
         svm.setKernel(cv2.ml.SVM_LINEAR)
         svm.setC(1.0)
 
-        # Split 80/20 si hay suficientes muestras
         n = len(X)
         idx = np.arange(n)
         np.random.shuffle(idx)
@@ -103,7 +158,6 @@ class TrainingService:
             acc = float((pred == yte).mean()) if len(yte) else 1.0
             n_train, n_test = len(ytr), len(yte)
         else:
-            # Muy pocas muestras: entrena con todo y reporta acc=1.0 (optimista)
             svm.train(X, cv2.ml.ROW_SAMPLE, y)
             acc = 1.0
             n_train, n_test = len(X), 0
@@ -113,7 +167,7 @@ class TrainingService:
             "accuracy": round(acc, 4),
             "n_train": n_train,
             "n_test": n_test,
-            "n_features": int(X.shape[1]),
+            "n_features": int(X.shape[1]) if X.ndim == 2 else 0,
         }
         return svm, metrics
 
@@ -151,14 +205,17 @@ class TrainingService:
                 # Entrenar
                 svm, metrics = TrainingService._train_svm(X, y)
 
-                # Guardar artefactos
-                artifacts_dir = os.path.join(storage_root, "models", model_uuid, "artifacts")
-                os.makedirs(artifacts_dir, exist_ok=True)
-                model_file = os.path.join(artifacts_dir, "svm_hog.xml")
-                meta_file = os.path.join(artifacts_dir, "meta.json")
+                # Guardar artefactos (RUTAS WINDOWS-FRIENDLY)
+                artifacts_dir_abs = os.path.normpath(
+                    os.path.join(storage_root, "models", model_uuid, "artifacts")
+                )
+                os.makedirs(artifacts_dir_abs, exist_ok=True)
 
-                svm.save(model_file)
-                with open(meta_file, "w", encoding="utf-8") as f:
+                model_file_abs = os.path.join(artifacts_dir_abs, "svm_hog.xml")
+                meta_file_abs = os.path.join(artifacts_dir_abs, "meta.json")
+
+                svm.save(model_file_abs)
+                with open(meta_file_abs, "w", encoding="utf-8") as f:
                     json.dump(
                         {
                             "algo": metrics["algo"],
@@ -188,13 +245,13 @@ class TrainingService:
                     mdl.status = 'ready'
                     mdl.version = (mdl.version or 0) + 1
                     mdl.last_trained_at = datetime.utcnow()
-                    mdl.artifact_path = os.path.relpath(model_file, start=storage_root)
+                    # Guardar artifact_path RELATIVO POSIX en DB
+                    mdl.artifact_path = to_rel_storage_path(storage_root, model_file_abs)
                     db.add(mdl)
 
                 db.commit()
 
             except Exception as e:
-                # Marcar fallo
                 try:
                     TrainingJobRepository.update_status(db, job_id, 'failed', str(e))
                     ModelRepository.update_status(db, model_uuid, 'failed')
@@ -202,7 +259,6 @@ class TrainingService:
                 except Exception:
                     db.rollback()
                 finally:
-                    # Log simple a consola
                     print(f"[TRAIN][{job_id}] ERROR: {e}")
             finally:
                 db.close()
