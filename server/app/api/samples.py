@@ -7,6 +7,46 @@ from app.utils.errors import APIError
 from app.utils.files import validate_image_file
 from app.services.storage import StorageService
 
+# --- Helpers ---
+def _resolve_storage_path(storage_root: str, path_str: str) -> str:
+    """Normaliza y convierte una ruta (relativa o absoluta, con / o \) a absoluta respecto a storage_root."""
+    if not path_str:
+        return ''
+    storage_root = os.path.normpath(storage_root)
+
+    # Normaliza lo que venga del DB (resuelve '.','..' y separadores)
+    p0 = os.path.normpath(path_str)
+
+    # Si ya es absoluta, devuélvela normalizada
+    if os.path.isabs(p0):
+        return os.path.normpath(p0)
+
+    # Trabajamos en POSIX para limpiar prefijos 'storage' duplicados
+    p_posix = path_str.replace("\\", "/")
+    parts = [seg for seg in p_posix.split("/") if seg and seg != "."]
+
+    storage_name = os.path.basename(storage_root).replace("\\", "/").lower()
+    while parts and parts[0].lower() in ("storage", storage_name):
+        parts.pop(0)
+
+    rel = "/".join(parts)
+    abs_path = os.path.normpath(os.path.join(storage_root, rel.replace("/", os.sep)))
+    return abs_path
+
+def _to_rel_storage_path(storage_root: str, abs_path: str) -> str:
+    """Convierte absoluta -> relativa POSIX respecto a storage_root (si es posible)."""
+    if not abs_path:
+        return ''
+    storage_root = os.path.normpath(storage_root)
+    ap = os.path.normpath(abs_path)
+    try:
+        rel = os.path.relpath(ap, storage_root)
+    except ValueError:
+        # Diferente unidad (p. ej. D:\ vs C:\) -> deja absoluta POSIX
+        return ap.replace("\\", "/")
+    return rel.replace("\\", "/")
+# -----------------------------------------------------------------------------
+
 samples_bp = Blueprint('samples', __name__)
 
 @samples_bp.route('/upload-sample', methods=['POST'])
@@ -77,7 +117,7 @@ def upload_sample():
 def list_samples_by_model():
     """Return paginated list of samples for a model.
 
-    Expects JSON body: { "uuid": "<model_uuid>", "page": 1, "limit": 20, "label": "positive" }
+    Expects JSON body: { "uuid": "<model_uuid>", "page": 1, "limit": 20, "label": "positive", "embed": false, "debug": false }
     """
     data = request.get_json()
     if not data:
@@ -91,6 +131,7 @@ def list_samples_by_model():
     limit = int(data.get('limit', 20) or 20)
     label = data.get('label')  # optional: 'positive' or 'negative'
     embed = bool(data.get('embed', False))
+    debug = bool(data.get('debug', False))
 
     if page < 1:
         page = 1
@@ -106,25 +147,7 @@ def list_samples_by_model():
         items, total = SampleRepository.list_by_model(db, model_uuid, page, limit, label)
 
         storage_root = current_app.config.get('STORAGE_ROOT', './storage')
-
-        def to_rel(fp: str) -> str:
-            try:
-                fp_norm = os.path.normpath(fp)
-                sr = os.path.normpath(storage_root)
-                if os.path.isabs(fp_norm) and fp_norm.startswith(sr):
-                    return os.path.relpath(fp_norm, sr).replace('\\', '/')
-                return fp.replace('\\', '/')
-            except Exception:
-                return fp
-
-        # Helper to compute absolute path for stored file_path
-        def to_abs(fp: str) -> str:
-            if not fp:
-                return ''
-            fp_norm = fp.replace('/', os.sep)
-            if os.path.isabs(fp_norm):
-                return os.path.normpath(fp_norm)
-            return os.path.normpath(os.path.join(storage_root, fp_norm))
+        storage_root = os.path.normpath(storage_root)  # importante en Windows
 
         # Max embed size (MB)
         max_embed_mb = int(current_app.config.get('MAX_EMBED_SIZE_MB', 5))
@@ -132,6 +155,10 @@ def list_samples_by_model():
 
         results = []
         for s in items:
+            # resuelve absoluta robusta desde lo guardado en DB
+            abs_p = _resolve_storage_path(storage_root, s.file_path or '')
+            rel_p = _to_rel_storage_path(storage_root, abs_p)
+
             item = {
                 'id': s.id,
                 'type': s.label,
@@ -139,19 +166,26 @@ def list_samples_by_model():
                 'mime_type': s.mime_type,
                 'size_bytes': int(s.size_bytes) if s.size_bytes is not None else None,
                 'created_at': s.created_at.isoformat() if s.created_at else None,
-                'path': to_rel(s.file_path)
+                # siempre devolver ruta relativa POSIX consistente
+                'path': rel_p
             }
+
+            if debug:
+                item['__debug'] = {
+                    'db_file_path': s.file_path,
+                    'abs_resolved': abs_p,
+                    'storage_root': storage_root,
+                    'exists': os.path.isfile(abs_p)
+                }
 
             if embed:
                 try:
-                    abs_p = to_abs(s.file_path)
                     if os.path.isfile(abs_p):
                         size = os.path.getsize(abs_p)
                         if size <= max_embed_bytes:
                             with open(abs_p, 'rb') as f:
                                 b = f.read()
                             b64 = base64.b64encode(b).decode('ascii')
-                            # Provide a data URI so clients can set directly to <img.src>
                             item['data_uri'] = f"data:{s.mime_type};base64,{b64}"
                         else:
                             item['embed_skipped'] = True
@@ -159,6 +193,8 @@ def list_samples_by_model():
                     else:
                         item['embed_skipped'] = True
                         item['embed_reason'] = 'file not found on server'
+                        if debug:
+                            item['__debug']['embed_reason_path'] = abs_p
                 except Exception as exc:
                     item['embed_skipped'] = True
                     item['embed_reason'] = f'error reading file: {str(exc)}'
