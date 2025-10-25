@@ -1,7 +1,7 @@
 import uuid
 from flask import Blueprint, request, jsonify, current_app
 from app.db.models import SessionLocal
-from app.db.repositories import ModelRepository
+from app.db.repositories import ModelRepository, SampleRepository
 from app.utils.errors import APIError
 from app.services.training import TrainingService
 
@@ -100,5 +100,33 @@ def train_model():
             'job_id': job_id,
             'status': 'queued'
         }), 202
+    finally:
+        db.close()
+
+
+@models_bp.route('/counts', methods=['GET'])
+def get_model_counts():
+    """Returns number of positive and negative samples for a given model UUID.
+
+    Query param: uuid
+    """
+    model_uuid = request.args.get('uuid')
+
+    if not model_uuid:
+        raise APIError('UUID is required', 400, {'field': 'uuid'})
+
+    db = SessionLocal()
+    try:
+        model = ModelRepository.get_by_uuid(db, model_uuid)
+        if not model:
+            raise APIError('Model not found', 404, {'uuid': model_uuid})
+
+        n_pos, n_neg = SampleRepository.count_labels(db, model_uuid)
+
+        return jsonify({
+            'uuid': model_uuid,
+            'positive': n_pos,
+            'negative': n_neg
+        }), 200
     finally:
         db.close()

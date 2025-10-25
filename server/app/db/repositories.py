@@ -94,6 +94,21 @@ class SampleRepository:
             Sample.sha256 == sha256
         ).first()
 
+    @staticmethod
+    def count_labels(db: Session, model_uuid: str):
+        """Return (n_pos, n_neg) for the given model_uuid."""
+        n_pos = db.query(func.count(Sample.id)).filter(
+            Sample.model_uuid == model_uuid,
+            Sample.label == 'positive'
+        ).scalar() or 0
+
+        n_neg = db.query(func.count(Sample.id)).filter(
+            Sample.model_uuid == model_uuid,
+            Sample.label == 'negative'
+        ).scalar() or 0
+
+        return int(n_pos), int(n_neg)
+
 class TrainingJobRepository:
     @staticmethod
     def create(db: Session, job_id: str, model_uuid: str):
