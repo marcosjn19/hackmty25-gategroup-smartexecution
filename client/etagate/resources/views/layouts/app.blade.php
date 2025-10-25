@@ -38,14 +38,22 @@
             --etagate-orange-dark: #e66a00;
         }
     </style>
+    <style>
+        [x-cloak] {
+            display: none !important
+        }
+    </style>
 </head>
 
 <body class="bg-gray-50">
     <div x-data="{
-        sidebarOpen: true,
-        activeItem: 'dashboard',
-        isMobile: window.innerWidth < 768
-    }" @resize.window="isMobile = window.innerWidth < 768" class="flex h-screen overflow-hidden">
+                    activeItem: 'dashboard',
+                    isMobile: window.innerWidth < 768,
+                    sidebarOpen: window.innerWidth >= 768
+                }" @resize.window="
+                    isMobile = window.innerWidth < 768;
+                    sidebarOpen = !isMobile;  // abierto en desktop, cerrado en móvil
+                " class="flex h-screen overflow-hidden">
 
         <!-- Overlay para móvil -->
         <div x-show="sidebarOpen && isMobile" @click="sidebarOpen = false"
@@ -55,7 +63,7 @@
             class="fixed inset-0 bg-gray-900 bg-opacity-50 z-40 md:hidden"></div>
 
         <!-- Sidebar -->
-        <aside x-show="sidebarOpen || !isMobile" x-transition:enter="transition ease-in-out duration-300 transform"
+        <aside x-cloak x-show="sidebarOpen" x-transition:enter="transition ease-in-out duration-300 transform"
             x-transition:enter-start="-translate-x-full" x-transition:enter-end="translate-x-0"
             x-transition:leave="transition ease-in-out duration-300 transform" x-transition:leave-start="translate-x-0"
             x-transition:leave-end="-translate-x-full"
@@ -228,11 +236,12 @@
         <!-- Contenido Principal -->
         <main class="flex-1 overflow-y-auto bg-gray-50">
             <!-- Header superior -->
-            <header class="bg-white shadow-sm border-b border-gray-200">
-                <div class="flex items-center justify-between px-6 py-4">
+            <header class="bg-white border-b border-gray-200 h-20">
+                <div class="h-full flex items-center justify-between px-6">
                     <div class="flex items-center">
                         <button @click="sidebarOpen = !sidebarOpen"
-                            class="text-etagate-blue hover:text-etagate-orange focus:outline-none focus:ring-2 focus:ring-etagate-orange rounded-lg p-2 transition-colors duration-200">
+                            class="text-etagate-blue hover:text-etagate-orange focus:outline-none focus:ring-2 focus:ring-etagate-orange rounded-lg p-2 transition-colors duration-200"
+                            aria-label="Toggle sidebar">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M4 6h16M4 12h16M4 18h16"></path>
@@ -241,7 +250,6 @@
                         <h1 class="ml-4 text-2xl font-bold text-etagate-blue capitalize" x-text="activeItem"></h1>
                     </div>
 
-                    <!-- Botón CTA -->
                     <button
                         class="px-6 py-2.5 bg-gradient-to-r from-etagate-orange to-orange-600 text-white font-semibold rounded-full hover:shadow-lg transform hover:scale-105 transition-all duration-300">
                         Get Started
