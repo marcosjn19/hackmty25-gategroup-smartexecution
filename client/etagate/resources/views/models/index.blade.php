@@ -15,8 +15,7 @@
         <div class="mb-6 flex items-center justify-between">
             <h2 class="text-2xl font-bold text-etagate-blue">Models</h2>
             <a href="{{ route('models.create') }}"
-                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-white font-semibold
-                      bg-gradient-to-r from-etagate-orange to-orange-600 hover:shadow-lg transform hover:scale-105 transition-all">
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-white font-semibold bg-gradient-to-r from-etagate-orange to-orange-600 hover:shadow-lg transform hover:scale-105 transition-all">
                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 4v16m8-8H4" />
                 </svg>
