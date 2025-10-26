@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ModelController;
 use App\Http\Controllers\VoiceAssistantController;
 use Illuminate\Support\Facades\Route;
@@ -19,16 +18,13 @@ Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])
     ->name('models.samples.store');
 
 // Preflight (si llega), responde 204 y listo — SIN nombre
-Route::options('/models/{model}/samples', function () {
-    return response()->noContent();
-});
+Route::options('/models/{model}/samples', fn() => response()->noContent());
 
 // Models (público)
 Route::resource('models', ModelController::class)->only(['index', 'create', 'store', 'destroy']);
 
 // API Routes
 Route::prefix('api')->group(function () {
-
     // User endpoint con autenticación Sanctum
     Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
         return $request->user();
@@ -61,29 +57,27 @@ Route::prefix('api')->group(function () {
         Route::post('/cleanup', [VoiceAssistantController::class, 'cleanupTempAudio'])->name('voice-assistant.cleanup');
     });
 });
+
 // Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])->name('models.samples.store');
 Route::post('/models/{model}/train', [ModelController::class, 'train'])->name('models.train');
 
+Route::get('/processes', [ProcessController::class, 'index'])->name('processes.index');
+Route::get('/processes/create', [ProcessController::class, 'create'])->name('processes.create');
+Route::post('/processes', [ProcessController::class, 'store'])->name('processes.store');
 
 // === API pública para Processes (sin auth, sin CSRF) ===
-Route::prefix('api')
-    ->middleware('api') // usa el stack de API (sin sesión)
-    ->withoutMiddleware([VerifyCsrfToken::class]) // desactiva CSRF sólo aquí
-    ->group(function () {
-        Route::apiResource('processes', ProcessController::class);
-        Route::get('processes/{process}/insights', [ProcessController::class, 'insights']);
-        Route::post('processes/{process}/validate', [\App\Http\Controllers\ProcessController::class, 'validateAndUpdate']);
+Route::prefix('api')->middleware('api')->withoutMiddleware([VerifyCsrfToken::class])->group(function () {
+    Route::apiResource('processes', ProcessController::class);
+    Route::get('processes/{process}/insights', [ProcessController::class, 'insights']);
+    Route::post('processes/{process}/validate', [ProcessController::class, 'validateAndUpdate']);
 
-
-        Route::get('probe/php-ini', function () {
-    return response()->json([
+    Route::get('probe/php-ini', fn() => response()->json([
         'upload_max_filesize' => ini_get('upload_max_filesize'),
-        'post_max_size'       => ini_get('post_max_size'),
-        'upload_tmp_dir'      => ini_get('upload_tmp_dir') ?: sys_get_temp_dir(),
-        'user_ini_filename'   => ini_get('user_ini.filename'),
-        'sapi'                => php_sapi_name(),
-    ]);
+        'post_max_size' => ini_get('post_max_size'),
+        'upload_tmp_dir' => ini_get('upload_tmp_dir') ?: sys_get_temp_dir(),
+        'user_ini_filename' => ini_get('user_ini.filename'),
+        'sapi' => php_sapi_name(),
+    ]));
 });
-    });
 
 
