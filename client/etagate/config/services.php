@@ -45,5 +45,8 @@ return [
         'base_url' => env('ELEVENLABS_BASE_URL', 'https://api.elevenlabs.io/v1'),
         'voice_id' => env('ELEVENLABS_VOICE_ID', 'flq6f7yk4E4fJM5XTYuZ'), // Rachel - voz femenina multiidioma
     ],
-
+  
+    'flask' => [
+        'base_url' => env('FLASK_BASE_URL', 'https://9bfcb5fd3633.ngrok-free.app/'),
+    ],
 ];
