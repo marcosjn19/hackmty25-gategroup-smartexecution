@@ -1,7 +1,10 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ModelController;
+use App\Http\Controllers\VoiceAssistantController;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Http\Request;
 
 // Home → Dashboard público
 Route::get('/', fn () => redirect()->route('dashboard'));
@@ -12,8 +15,48 @@ Route::get('/dashboard', fn () => view('dashboard'))->name('dashboard');
 // Models (público)
 Route::resource('models', ModelController::class)->only(['index', 'create', 'store', 'destroy']);
 
+// API Routes
+Route::prefix('api')->group(function () {
+    
+    // User endpoint con autenticación Sanctum
+    Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+        return $request->user();
+    });
+
+    // Endpoint de health check (sin auth para diagnóstico)
+    Route::get('/health', function () {
+        return response()->json([
+            'success' => true,
+            'status' => 'ok',
+            'timestamp' => now()->toISOString(),
+            'services' => [
+                'database' => true,
+                'gemini' => !empty(env('GEMINI_API_KEY')),
+                'elevenlabs' => !empty(env('ELEVENLABS_API_KEY'))
+            ]
+        ]);
+    })->name('api.health');
+
+    // Rutas del asistente de voz (SIN AUTENTICACIÓN)
+    Route::prefix('voice-assistant')->group(function () {
+        // Procesar mensaje de texto transcrito en el frontend
+        Route::post('/process-text', [VoiceAssistantController::class, 'processTextMessage'])
+            ->middleware(['throttle:20,1'])
+            ->name('voice-assistant.process-text');
+        
+        // Procesar mensaje de voz completo (LEGACY - redirige a process-text)
+        Route::post('/process', [VoiceAssistantController::class, 'processTextMessage'])
+            ->middleware(['throttle:20,1'])
+            ->name('voice-assistant.process');
+        
+        // Obtener historial de conversaciones
+        Route::get('/history', [VoiceAssistantController::class, 'getConversationHistory'])
+            ->name('voice-assistant.history');
+        
+        // Limpiar archivos temporales de audio
+        Route::post('/cleanup', [VoiceAssistantController::class, 'cleanupTempAudio'])
+            ->name('voice-assistant.cleanup');
+    });
+});
 Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])->name('models.samples.store');
 Route::post('/models/{model}/train', [ModelController::class, 'train'])->name('models.train');
-
-// ⛔️ No cargamos las rutas de autenticación
-// require __DIR__ . '/auth.php';
