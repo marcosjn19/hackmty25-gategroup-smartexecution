@@ -14,6 +14,15 @@ Route::get('/', fn() => redirect()->route('dashboard'));
 // Dashboard público
 Route::get('/dashboard', fn() => view('dashboard'))->name('dashboard');
 
+// POST real
+Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])
+    ->name('models.samples.store');
+
+// Preflight (si llega), responde 204 y listo — SIN nombre
+Route::options('/models/{model}/samples', function () {
+    return response()->noContent();
+});
+
 // Models (público)
 Route::resource('models', ModelController::class)->only(['index', 'create', 'store', 'destroy']);
 
@@ -26,18 +35,16 @@ Route::prefix('api')->group(function () {
     });
 
     // Endpoint de health check (sin auth para diagnóstico)
-    Route::get('/health', function () {
-        return response()->json([
-            'success' => true,
-            'status' => 'ok',
-            'timestamp' => now()->toISOString(),
-            'services' => [
-                'database' => true,
-                'gemini' => !empty(env('GEMINI_API_KEY')),
-                'elevenlabs' => !empty(env('ELEVENLABS_API_KEY'))
-            ]
-        ]);
-    })->name('api.health');
+    Route::get('/health', fn() => response()->json([
+        'success' => true,
+        'status' => 'ok',
+        'timestamp' => now()->toISOString(),
+        'services' => [
+            'database' => true,
+            'gemini' => !empty(env('GEMINI_API_KEY')),
+            'elevenlabs' => !empty(env('ELEVENLABS_API_KEY'))
+        ]
+    ]))->name('api.health');
 
     // Rutas del asistente de voz (SIN AUTENTICACIÓN)
     Route::prefix('voice-assistant')->group(function () {
@@ -54,7 +61,7 @@ Route::prefix('api')->group(function () {
         Route::post('/cleanup', [VoiceAssistantController::class, 'cleanupTempAudio'])->name('voice-assistant.cleanup');
     });
 });
-Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])->name('models.samples.store');
+// Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])->name('models.samples.store');
 Route::post('/models/{model}/train', [ModelController::class, 'train'])->name('models.train');
 
 
