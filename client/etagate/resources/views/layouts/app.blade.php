@@ -1,3 +1,26 @@
+@php
+    use Illuminate\Support\Str;
+
+    // Brand
+    $brand = config('app.name', 'Etagate');
+
+    // Page title passed by the view (big header text)
+    $pageTitleSection = trim($__env->yieldContent('page_title')); // e.g., 'Models', 'Create model'
+
+    // Optional <title> override (rarely needed)
+    $explicitTitle = trim($__env->yieldContent('title')); // e.g., 'Etagate – My Custom Title'
+
+    // Fallback from route name if no section is provided
+    $routeName = \Illuminate\Support\Facades\Route::currentRouteName();
+    $routeFallback = $routeName
+        ? Str::of($routeName)->before('.')->replace(['-', '_'], ' ')->title() // 'models.index' -> 'Models'
+        : 'Dashboard';
+
+    // Compose final <title>
+    $computedPageTitle = $pageTitleSection !== '' ? $pageTitleSection : (string) $routeFallback;
+    $finalHtmlTitle = $explicitTitle !== '' ? $explicitTitle : "{$computedPageTitle} — {$brand}";
+@endphp
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -5,7 +28,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Etagate - Dashboard</title>
+    <title>{{ $finalHtmlTitle }}</title>
 
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -83,8 +106,7 @@
                     <!-- Dashboard -->
                     <li>
                         <a href="{{ route('dashboard') }}"
-                            class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform
-                           {{ request()->routeIs('dashboard') ? 'bg-gradient-to-r from-etagate-orange to-orange-600 text-white shadow-lg scale-105' : 'text-gray-700 hover:text-etagate-orange hover:bg-gray-50' }}">
+                            class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform {{ request()->routeIs('dashboard') ? 'bg-gradient-to-r from-etagate-orange to-orange-600 text-white shadow-lg scale-105' : 'text-gray-700 hover:text-etagate-orange hover:bg-gray-50' }}">
                             <div
                                 class="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300
                                 {{ request()->routeIs('dashboard') ? 'bg-white bg-opacity-20' : 'bg-gray-100 group-hover:bg-etagate-orange group-hover:bg-opacity-10' }}">
@@ -101,8 +123,7 @@
                     <!-- Models -->
                     <li>
                         <a href="{{ route('models.index') }}"
-                            class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform
-                           {{ request()->routeIs('models.*') ? 'bg-gradient-to-r from-etagate-orange to-orange-600 text-white shadow-lg scale-105' : 'text-gray-700 hover:text-etagate-orange hover:bg-gray-50' }}">
+                            class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform {{ request()->routeIs('models.*') ? 'bg-gradient-to-r from-etagate-orange to-orange-600 text-white shadow-lg scale-105' : 'text-gray-700 hover:text-etagate-orange hover:bg-gray-50' }}">
                             <div
                                 class="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300
                                 {{ request()->routeIs('models.*') ? 'bg-white bg-opacity-20' : 'bg-gray-100 group-hover:bg-etagate-orange group-hover:bg-opacity-10' }}">
@@ -118,8 +139,7 @@
 
                     <!-- Processes (placeholder) -->
                     <li>
-                        <a href="#" class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform
-                           text-gray-700 hover:text-etagate-orange hover:bg-gray-50">
+                        <a href="#" class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform text-gray-700 hover:text-etagate-orange hover:bg-gray-50">
                             <div
                                 class="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-etagate-orange group-hover:bg-opacity-10">
                                 <svg class="w-5 h-5 text-gray-600 group-hover:text-etagate-orange" fill="none"
@@ -166,18 +186,18 @@
                             </svg>
                         </button>
 
-                        <!-- Title from slot or from a Blade section -->
                         <div class="ml-4 text-2xl font-bold text-etagate-blue">
-                            @isset($header)
+                            @if(trim($__env->yieldContent('page_title')) !== '')
+                                @yield('page_title')
+                            @elseif(isset($header))
                                 {{ $header }}
                             @else
-                                @yield('page_title', 'Dashboard')
-                            @endisset
+                                {{ $computedPageTitle }}
+                            @endif
                         </div>
                     </div>
 
-                    <button
-                        class="px-6 py-2.5 bg-gradient-to-r from-etagate-orange to-orange-600 text-white font-semibold rounded-full hover:shadow-lg transform hover:scale-105 transition-all duration-300">
+                    <button class="px-6 py-2.5 bg-gradient-to-r from-etagate-orange to-orange-600 text-white font-semibold rounded-full hover:shadow-lg transform hover:scale-105 transition-all duration-300">
                         Get Started
                     </button>
                 </div>

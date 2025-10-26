@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class ExternalModelApi
 {
@@ -23,9 +24,7 @@ class ExternalModelApi
     public function register(string $name, ?string $description = null): string
     {
         $payload = ['name' => $name];
-        if (!empty($description)) {
-            $payload['description'] = $description;
-        }
+        if (!empty($description)) $payload['description'] = $description;
 
         $response = Http::asJson()->post($this->url('/register'), $payload);
         $response->throw();
@@ -36,11 +35,10 @@ class ExternalModelApi
         if (!$uuid || !is_string($uuid)) {
             throw new \RuntimeException("Missing 'uuid' in API response.");
         }
-
         return $uuid;
     }
 
-    /** GET /available (lista de modelos). */
+    /** GET /available */
     public function available(): array
     {
         $response = Http::get($this->url('/available'));
@@ -52,21 +50,18 @@ class ExternalModelApi
         $normalized = [];
         foreach ($items as $row) {
             $uuid = $row['uuid'] ?? ($row['id'] ?? null);
-            if (!$uuid)
-                continue;
+            if (!$uuid) continue;
 
             $normalized[] = [
-                'uuid' => (string) $uuid,
-                'name' => (string) ($row['name'] ?? ''),
+                'uuid'        => (string) $uuid,
+                'name'        => (string) ($row['name'] ?? ''),
                 'description' => (string) ($row['description'] ?? ''),
-                // el endpoint no trae “status”; para el listado basta con estos campos
             ];
         }
-
         return $normalized;
     }
 
-    /** Mapa uuid => row */
+    /** Map uuid => row */
     public function availableMap(): array
     {
         $map = [];
@@ -76,21 +71,25 @@ class ExternalModelApi
         return $map;
     }
 
-    /** POST /upload-sample (una imagen). */
+    /** POST /upload-sample (UNA imagen). Flask espera el CAMPO 'image'. */
     public function uploadSample(string $uuid, string $type, UploadedFile $file): array
     {
+        $stream = fopen($file->getRealPath(), 'r');
+
         $response = Http::asMultipart()
-            ->attach('image', file_get_contents($file->getRealPath()), $file->getClientOriginalName())
+            ->attach('image', $stream, $file->getClientOriginalName()) // <- CAMPO CORRECTO
             ->post($this->url('/upload-sample'), [
                 'uuid' => $uuid,
                 'type' => $type,
             ]);
 
+        // Si la API responde con error, lanza para que el controller lo capture y devuelva 422
         $response->throw();
+
         return (array) $response->json();
     }
 
-    /** Helper: varias imágenes. */
+    /** Helper: varias imágenes (1x1) */
     public function uploadSamples(string $uuid, string $type, array $files): array
     {
         $results = [];
@@ -102,26 +101,24 @@ class ExternalModelApi
         return $results;
     }
 
-    /** POST /counts → {positive, negative} */
+    /** POST /counts → {positive, negative} (JSON) */
     public function counts(string $uuid): array
     {
-        // Enviar JSON
         $response = Http::asJson()->post($this->url('/counts'), ['uuid' => $uuid]);
         $response->throw();
 
         $json = (array) $response->json();
         return [
-            'positive' => (int) ($json['positive'] ?? null),
-            'negative' => (int) ($json['negative'] ?? null),
+            'positive' => (int) ($json['positive'] ?? 0),
+            'negative' => (int) ($json['negative'] ?? 0),
         ];
     }
 
+    /** POST /train (JSON) */
     public function train(string $uuid): array
     {
-        // Enviar JSON
         $response = Http::asJson()->post($this->url('/train'), ['uuid' => $uuid]);
         $response->throw();
-
         return (array) $response->json();
     }
 }
