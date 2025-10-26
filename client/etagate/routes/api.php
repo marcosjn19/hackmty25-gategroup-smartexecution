@@ -39,17 +39,14 @@ Route::prefix('voice-assistant')->group(function () {
     Route::post('/process-text', [VoiceAssistantController::class, 'processTextMessage'])
         ->middleware(['auth', 'throttle:20,1'])
         ->name('voice-assistant.process-text');
-    
-    // Procesar mensaje de voz completo (LEGACY - redirige a process-text)
-    Route::post('/process', [VoiceAssistantController::class, 'processTextMessage'])
-        ->middleware(['auth', 'throttle:20,1'])
-        ->name('voice-assistant.process');
-    
+
+
+
     // Obtener historial de conversaciones
     Route::get('/history', [VoiceAssistantController::class, 'getConversationHistory'])
         ->middleware(['auth'])
         ->name('voice-assistant.history');
-    
+
     // Limpiar archivos temporales de audio
     Route::post('/cleanup', [VoiceAssistantController::class, 'cleanupTempAudio'])
         ->middleware(['auth'])

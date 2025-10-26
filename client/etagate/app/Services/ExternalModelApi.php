@@ -20,6 +20,14 @@ class ExternalModelApi
         return rtrim($this->baseUrl, '/') . '/' . ltrim($path, '/');
     }
 
+    /**
+     * Return the configured base URL used by this service.
+     */
+    public function getBaseUrl(): string
+    {
+        return $this->baseUrl;
+    }
+
     /** Register a model and return its UUID. */
     public function register(string $name, ?string $description = null): string
     {

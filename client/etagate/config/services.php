@@ -22,6 +22,15 @@ return [
         'key' => env('RESEND_KEY'),
     ],
 
+    'inference' => [
+        'base' => env('INFERENCE_API_BASE'),
+        'timeout' => env('INFERENCE_API_TIMEOUT', 25),
+        'verify' => env('INFERENCE_TLS_VERIFY', true),
+        'api_key' => env('INFERENCE_API_KEY'),
+        'basic_user' => env('INFERENCE_BASIC_USER'),
+        'basic_pass' => env('INFERENCE_BASIC_PASS'),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),
@@ -49,4 +58,6 @@ return [
     'flask' => [
         'base_url' => env('FLASK_BASE_URL', 'https://9bfcb5fd3633.ngrok-free.app/'),
     ],
+
+
 ];

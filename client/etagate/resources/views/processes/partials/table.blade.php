@@ -28,15 +28,25 @@
 
                 {{-- View --}}
                 <td class="px-4 py-3 text-center">
-                    <button type="button"
-                        class="inline-flex items-center justify-center w-9 h-9 rounded-full border border-gray-200 hover:bg-gray-50"
-                        @click.prevent="openFor({ id: {{ $p->id }}, name: @js($p->name) })"
-                        title="View details">
-                        <svg class="w-5 h-5 text-gray-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
-                            <circle cx="12" cy="12" r="3" />
-                        </svg>
-                    </button>
+                    <div class="inline-flex items-center space-x-2">
+                        <a href="{{ route('processes.run', ['process' => $p->id]) }}"
+                            class="inline-flex items-center justify-center w-9 h-9 rounded-full border border-gray-200 hover:bg-gray-50"
+                            title="Run process">
+                            <svg class="w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <path d="M5 3v18l15-9L5 3z" />
+                            </svg>
+                        </a>
+
+                        <button type="button"
+                            class="inline-flex items-center justify-center w-9 h-9 rounded-full border border-gray-200 hover:bg-gray-50"
+                            @click.prevent="openFor({ id: {{ $p->id }}, name: @js($p->name) })"
+                            title="View details">
+                            <svg class="w-5 h-5 text-gray-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </button>
+                    </div>
                 </td>
             </tr>
         @empty

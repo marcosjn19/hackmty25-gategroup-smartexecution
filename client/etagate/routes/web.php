@@ -67,9 +67,9 @@ Route::post('/processes', [ProcessController::class, 'store'])->name('processes.
 
 // === API pública para Processes (sin auth, sin CSRF) ===
 Route::prefix('api')->middleware('api')->withoutMiddleware([VerifyCsrfToken::class])->group(function () {
-    Route::apiResource('processes', ProcessController::class);
-    Route::get('processes/{process}/insights', [ProcessController::class, 'insights']);
-    Route::post('processes/{process}/validate', [ProcessController::class, 'validateAndUpdate']);
+    Route::apiResource('procesos', ProcessController::class);
+    Route::get('procesos/{process}/insights', [ProcessController::class, 'insights']);
+    Route::post('procesos/{process}/validate', [ProcessController::class, 'validateAndUpdate']);
 
     Route::get('probe/php-ini', fn() => response()->json([
         'upload_max_filesize' => ini_get('upload_max_filesize'),
@@ -80,4 +80,16 @@ Route::prefix('api')->middleware('api')->withoutMiddleware([VerifyCsrfToken::cla
     ]));
 });
 
+// Web UI: run (execute) a process — single-image validation flow
+Route::get('/processes/{process}/run', [ProcessController::class, 'run'])->name('processes.run');
 
+
+
+// En routes/web.php o routes/api.php
+Route::get('/test-env', function() {
+    return response()->json([
+        'INFERENCE_API_BASE' => env('INFERENCE_API_BASE'),
+        'is_empty' => empty(env('INFERENCE_API_BASE')),
+        'config_app_env' => config('app.env'),
+    ]);
+});

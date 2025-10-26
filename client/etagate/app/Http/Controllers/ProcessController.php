@@ -10,10 +10,11 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
+use App\Services\ExternalModelApi;
 
 class ProcessController extends Controller
 {
-    /** LIST: GET /api/processes?status=&q= */
+    /** LIST: GET /api/procesos?status=&q= */
     // ====== LIST (WEB o API) ======
     public function index(Request $request)
     {
@@ -112,13 +113,22 @@ class ProcessController extends Controller
     }
 
 
-    /** SHOW: GET /api/processes/{process} */
+    /** SHOW: GET /api/procesos/{process} */
     public function show(Process $process)
     {
         return $process;
     }
 
-    /** UPDATE: PUT/PATCH /api/processes/{process} */
+    /**
+     * Web UI to run a process: single-image validation per model.
+     */
+    public function run(Process $process)
+    {
+        // For web view we pass the process instance (Eloquent json casts will be available)
+        return view('processes.run', ['process' => $process]);
+    }
+
+    /** UPDATE: PUT/PATCH /api/procesos/{process} */
     public function update(Request $request, Process $process)
     {
         $data = $request->validate([
@@ -155,7 +165,7 @@ class ProcessController extends Controller
         return $process->refresh();
     }
 
-    /** DELETE: DELETE /api/processes/{process} */
+    /** DELETE: DELETE /api/procesos/{process} */
     public function destroy(Process $process)
     {
         $process->delete();
@@ -163,13 +173,20 @@ class ProcessController extends Controller
     }
 
     /**
-     * VALIDATE: POST /api/processes/{process}/validate
+     * VALIDATE: POST /api/procesos/{process}/validate
      * Params:
      *  - image (file, required)
      *  - camera_id (string, optional)
      *  - model_uuid (uuid, optional)  -> prioridad 1
      *  - model_order (int, optional)  -> prioridad 2
      *  Si no se envía ninguno, toma el primer modelo habilitado por order_index.
+     *
+     * Ejemplo:
+     * curl -X POST "http://127.0.0.1:8000/api/procesos/1/validate" \
+     *   -H "Accept: application/json" \
+     *   -F "model_uuid=7503fd1f-9a54-4bc3-af49-ecdf2c4dc282" \
+     *   -F "image=@/path/to/image.jpeg" \
+     *   -F "camera_id=dock-01"
      */
     public function validateAndUpdate(Request $request, Process $process)
     {
@@ -190,8 +207,8 @@ class ProcessController extends Controller
             ], 422);
         }
 
-        Storage::makeDirectory("public/processes/{$process->id}");
-        $storedPath = $file->store("public/processes/{$process->id}");
+        Storage::makeDirectory("public/procesoss/{$process->id}");
+        $storedPath = $file->store("public/procesos/{$process->id}");
         $absPath = Storage::path($storedPath);
         if (!is_file($absPath)) {
             Log::warning('Stored image not found; fallback to temp path', [
@@ -264,15 +281,36 @@ class ProcessController extends Controller
 
         $threshold = $target['threshold'] ?? $process->default_threshold ?? null;
 
-        // 3) Cliente Guzzle
+        // 3) Cliente Guzzle - Validación simplificada
         $client = $this->inferenceClient();
 
         // 4) Multipart (SOLO uuid + image) — NO enviamos threshold
+        // Open the file stream safely: prefer the stored absolute path, fallback to the uploaded tmp path.
+        $stream = null;
+        try {
+            if ($absPath && is_file($absPath) && is_readable($absPath)) {
+                $stream = fopen($absPath, 'r');
+            } elseif ($file->getRealPath() && is_file($file->getRealPath()) && is_readable($file->getRealPath())) {
+                $stream = fopen($file->getRealPath(), 'r');
+            }
+        } catch (\Throwable $e) {
+            Log::error('Failed opening image for multipart', ['absPath' => $absPath, 'tmp' => $file->getRealPath(), 'exception' => $e->getMessage()]);
+            $stream = null;
+        }
+
+        if ($stream === null) {
+            Log::error('Cannot open uploaded image for sending to inference', ['absPath' => $absPath, 'tmp' => $file->getRealPath()]);
+            return response()->json([
+                'message' => 'Unable to read uploaded image for inference',
+                'detail' => 'Check storage permissions and ensure the uploaded file is available',
+            ], 500);
+        }
+
         $multipart = [
             ['name' => 'uuid', 'contents' => $target['model_uuid']],
             [
                 'name' => 'image',
-                'contents' => fopen($absPath, 'r'),
+                'contents' => $stream,
                 'filename' => $file->getClientOriginalName(),
                 'headers' => ['Content-Type' => $file->getMimeType() ?: 'application/octet-stream'],
             ],
@@ -371,7 +409,7 @@ class ProcessController extends Controller
         return $this->finalizeSingleResult($process, $file, $request->input('camera_id'), $result);
     }
 
-    /** INSIGHTS: GET /api/processes/{process}/insights */
+    /** INSIGHTS: GET /api/procesos/{process}/insights */
     public function insights(Process $process)
     {
         $perModel = $this->buildPerModelSnapshot($process);
@@ -516,34 +554,36 @@ class ProcessController extends Controller
     /** ==== Guzzle helpers ==== */
     private function inferenceClient(): Client
     {
-        $base = rtrim(env('INFERENCE_API_BASE', ''), '/');
-        if ($base === '') {
-            abort(500, 'INFERENCE_API_BASE is not set. Define it in .env');
+        // Prefer the configured ExternalModelApi base URL so the app has a single source of truth
+        try {
+            /** @var ExternalModelApi $externalApi */
+            $externalApi = app()->make(ExternalModelApi::class);
+            $base = $externalApi->getBaseUrl();
+        } catch (\Throwable $e) {
+            $base = null;
+        }
+
+        if (empty($base)) {
+            throw new \Exception('Validation failed: inference base URL is not set. Configure services.flask.base_url or bind ExternalModelApi.');
         }
 
         return new Client([
-            'base_uri' => $base . '/',
-            'timeout' => (int) env('INFERENCE_API_TIMEOUT', 25),
+            'base_uri' => rtrim($base, '/') . '/',
+            'timeout' => 30,
             'http_errors' => false,
-            'verify' => filter_var(env('INFERENCE_TLS_VERIFY', 'true'), FILTER_VALIDATE_BOOLEAN),
+            'verify' => false, // ngrok no necesita verificación SSL
         ]);
     }
 
     private function inferenceRequestOptions(array $multipart): array
     {
-        $headers = ['Accept' => 'application/json'];
-
-        if ($key = env('INFERENCE_API_KEY')) {
-            $headers['Authorization'] = 'Bearer ' . $key;
-        }
-
-        $opts = ['headers' => $headers, 'multipart' => $multipart];
-
-        if ($user = env('INFERENCE_BASIC_USER')) {
-            $opts['auth'] = [$user, env('INFERENCE_BASIC_PASS', '')];
-        }
-
-        return $opts;
+        return [
+            'headers' => [
+                'Accept' => 'application/json',
+                'ngrok-skip-browser-warning' => 'true', // evita la página de advertencia de ngrok
+            ],
+            'multipart' => $multipart
+        ];
     }
 
     /** Finaliza guardando last_request y agregados para un solo resultado */
