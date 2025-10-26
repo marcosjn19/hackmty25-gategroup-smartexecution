@@ -94,6 +94,34 @@ class SampleRepository:
             Sample.sha256 == sha256
         ).first()
 
+    @staticmethod
+    def list_by_model(db: Session, model_uuid: str, page: int = 1, limit: int = 20, label: str | None = None):
+        """Return (items, total) for samples of a model, optionally filtered by label.
+
+        Items returned are Sample ORM objects ordered by id desc.
+        """
+        query = db.query(Sample).filter(Sample.model_uuid == model_uuid)
+        if label in ("positive", "negative"):
+            query = query.filter(Sample.label == label)
+        total = query.count()
+        items = query.order_by(Sample.id.desc()).offset((page - 1) * limit).limit(limit).all()
+        return items, total
+
+    @staticmethod
+    def count_labels(db: Session, model_uuid: str):
+        """Return (n_pos, n_neg) for the given model_uuid."""
+        n_pos = db.query(func.count(Sample.id)).filter(
+            Sample.model_uuid == model_uuid,
+            Sample.label == 'positive'
+        ).scalar() or 0
+
+        n_neg = db.query(func.count(Sample.id)).filter(
+            Sample.model_uuid == model_uuid,
+            Sample.label == 'negative'
+        ).scalar() or 0
+
+        return int(n_pos), int(n_neg)
+
 class TrainingJobRepository:
     @staticmethod
     def create(db: Session, job_id: str, model_uuid: str):

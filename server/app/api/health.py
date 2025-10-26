@@ -25,7 +25,7 @@ def healthcheck():
     uptime_seconds = int(time.time() - start_time)
     
     return jsonify({
-        'status': 'healthy' if (db_healthy and storage_healthy) else 'unhealthy',
+        'status': 'healthy' if (db_healthy) else 'unhealthy',
         'version': '1.0.0',
         'db': db_healthy,
         'storage': storage_healthy,

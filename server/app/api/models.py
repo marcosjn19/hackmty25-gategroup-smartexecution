@@ -1,7 +1,7 @@
 import uuid
 from flask import Blueprint, request, jsonify, current_app
 from app.db.models import SessionLocal
-from app.db.repositories import ModelRepository
+from app.db.repositories import ModelRepository, SampleRepository
 from app.utils.errors import APIError
 from app.services.training import TrainingService
 
@@ -102,3 +102,89 @@ def train_model():
         }), 202
     finally:
         db.close()
+
+
+@models_bp.route('/counts', methods=['POST'])
+def get_model_counts():
+    """
+    Returns number of positive and negative samples for a given model UUID,
+    contando archivos en el filesystem (no BD).
+
+    Expects JSON body: { "uuid": "<model_uuid>" }
+    """
+    import os  # import local para no modificar encabezados del archivo
+
+    data = request.get_json()
+    if not data:
+        raise APIError('Invalid JSON', 400)
+
+    model_uuid = data.get('uuid')
+    if not model_uuid:
+        raise APIError('UUID is required', 400, {'field': 'uuid'})
+
+    # Verifica existencia del modelo (mantenemos semántica previa)
+    db = SessionLocal()
+    try:
+        model = ModelRepository.get_by_uuid(db, model_uuid)
+        if not model:
+            raise APIError('Model not found', 404, {'uuid': model_uuid})
+    finally:
+        db.close()
+
+    # Raíz de storage (normalizada y absoluta por seguridad en servicios Windows)
+    storage_root = current_app.config.get('STORAGE_ROOT', './storage')
+    storage_root = os.path.normpath(storage_root)
+    if not os.path.isabs(storage_root):
+        storage_root = os.path.abspath(storage_root)
+
+    # Candidatos compatibles (con y sin "samples/", plural/singular)
+    pos_dirs = [
+        os.path.join(storage_root, 'models', model_uuid, 'samples', 'positives'),
+        os.path.join(storage_root, 'models', model_uuid, 'samples', 'positive'),
+        os.path.join(storage_root, 'models', model_uuid, 'positives'),
+        os.path.join(storage_root, 'models', model_uuid, 'positive'),
+    ]
+    neg_dirs = [
+        os.path.join(storage_root, 'models', model_uuid, 'samples', 'negatives'),
+        os.path.join(storage_root, 'models', model_uuid, 'samples', 'negative'),
+        os.path.join(storage_root, 'models', model_uuid, 'negatives'),
+        os.path.join(storage_root, 'models', model_uuid, 'negative'),
+    ]
+
+    # Normaliza y quita duplicados
+    def _uniq_norm(paths):
+        seen, out = set(), []
+        for p in paths:
+            n = os.path.normpath(p)
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out
+
+    pos_dirs = _uniq_norm(pos_dirs)
+    neg_dirs = _uniq_norm(neg_dirs)
+
+    # Conteo recursivo de archivos (ignora ocultos que empiezan con '.')
+    def _count_files(dirs):
+        total = 0
+        for d in dirs:
+            if not os.path.isdir(d):
+                continue
+            for root, _subdirs, files in os.walk(d):
+                for name in files:
+                    if not name or name.startswith('.'):
+                        continue
+                    fp = os.path.join(root, name)
+                    if os.path.isfile(fp):
+                        total += 1
+        return total
+
+    n_pos = _count_files(pos_dirs)
+    n_neg = _count_files(neg_dirs)
+
+    return jsonify({
+        'uuid': model_uuid,
+        'positive': int(n_pos),
+        'negative': int(n_neg)
+    }), 200
+
