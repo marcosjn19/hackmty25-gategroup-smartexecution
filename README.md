@@ -143,7 +143,7 @@ etagate combines:
 
 ## Try It Out
 
-- **Live Demo:** [hy8u9riz.up.railway.app](https://hy8u9riz.up.railway.app)
+- **Live Demo:** [https://hackmty25-gategroup-smartexecution-production.up.railway.app](https://hackmty25-gategroup-smartexecution-production.up.railway.app)
 - **Website:** [etagate.tech](https://etagate.tech)
 - **GitHub Repository:** [View Code](#)
 
