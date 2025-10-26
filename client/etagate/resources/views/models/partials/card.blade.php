@@ -11,7 +11,7 @@
 
 <div x-data="{
         open: false,
-        positive: true,   // true => Positive (right/green), false => Negative (left/red)
+        positive: true,
         isDragging: false,
         files: [],
         setFiles(list) {
@@ -98,8 +98,7 @@
                 {{-- NUEVO: Train --}}
                 <form method="POST" action="{{ route('models.train', $model) }}">
                     @csrf
-                    <button type="submit" class="text-xs px-3 py-1.5 rounded-full text-white font-semibold
-                       bg-gradient-to-r from-etagate-orange to-orange-600 hover:shadow-lg">
+                    <button type="submit" class="text-xs px-3 py-1.5 rounded-full text-white font-semibold bg-gradient-to-r from-etagate-orange to-orange-600 hover:shadow-lg">
                         Train
                     </button>
                 </form>

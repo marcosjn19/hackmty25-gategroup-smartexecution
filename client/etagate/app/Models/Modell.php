@@ -12,7 +12,11 @@ class Modell extends Model
     protected $table = 'models';
 
     protected $fillable = [
-        'uuid', 'name', 'description', 'efficiency', 'eta',
+        'uuid',
+        'name',
+        'description',
+        'efficiency',
+        'eta',
     ];
 
     protected $casts = [
