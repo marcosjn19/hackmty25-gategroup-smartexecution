@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Process;
+use App\Models\Modell;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
@@ -13,6 +14,7 @@ use GuzzleHttp\Exception\GuzzleException;
 class ProcessController extends Controller
 {
     /** LIST: GET /api/processes?status=&q= */
+    // ====== LIST (WEB o API) ======
     public function index(Request $request)
     {
         $q = Process::query()->latest();
@@ -24,53 +26,91 @@ class ProcessController extends Controller
             $q->where('name', 'like', "%{$search}%");
         }
 
-        return $q->paginate(50);
+        $perPage = (int) $request->query('per_page', 50);
+        $processes = $q->paginate($perPage)->withQueryString();
+
+        // Si la petición es API/JSON, devolvemos el paginator tal cual
+        if ($request->expectsJson() || $request->wantsJson() || $request->is('api/*')) {
+            return $processes;
+        }
+
+        // Si es WEB, devolvemos la vista
+        return view('processes.index', compact('processes'));
     }
 
-    /** CREATE: POST /api/processes */
+    // ====== CREATE (WEB) ======
+    public function create()
+    {
+        // Trae modelos existentes para seleccionar (uuid + name)
+        $models = Modell::select('uuid', 'name')
+            ->whereNotNull('uuid')
+            ->orderBy('name')
+            ->get();
+
+        $defaultThreshold = 0.85;
+
+        return view('processes.create', compact('models', 'defaultThreshold'));
+    }
+
+    // ====== STORE (WEB o API) ======
     public function store(Request $request)
     {
+        // NOTA: misma validación para web y API (en web generamos el arreglo "models[...]")
         $data = $request->validate([
-            'name'                  => ['required','string','max:255'],
-            'default_threshold'     => ['nullable','numeric','between:0,1'],
-            'models'                => ['required','array','min:1'],
-            'models.*.model_uuid'   => ['required','uuid'],
-            'models.*.name'         => ['nullable','string','max:255'],
-            'models.*.order_index'  => ['required','integer','min:1'],
-            'models.*.threshold'    => ['nullable','numeric','between:0,1'],
-            'models.*.enabled'      => ['sometimes','boolean'],
-            'payload'               => ['nullable','array'],
-            'run_at'                => ['nullable','date'],
+            'name' => ['required', 'string', 'max:255'],
+            'default_threshold' => ['nullable', 'numeric', 'between:0,1'],
+            'models' => ['required', 'array', 'min:1'],
+            'models.*.model_uuid' => ['required', 'uuid'],
+            'models.*.name' => ['nullable', 'string', 'max:255'], // opcional en web (lo resolvemos nosotros)
+            'models.*.order_index' => ['required', 'integer', 'min:1'],
+            'models.*.threshold' => ['nullable', 'numeric', 'between:0,1'],
+            'models.*.enabled' => ['sometimes', 'boolean'],
+            'payload' => ['nullable', 'array'],
+            'run_at' => ['nullable', 'date'],
         ]);
 
-        $models = collect($data['models'])->map(function ($m) {
+        $DEFAULT_T = 0.85; // threshold fijo solicitado
+
+        // Resolver nombres si no vienen (web): mapeamos por uuid
+        $namesByUuid = Modell::whereIn('uuid', collect($data['models'])->pluck('model_uuid'))
+            ->pluck('name', 'uuid');
+
+        $models = collect($data['models'])->map(function ($m) use ($namesByUuid, $DEFAULT_T) {
             return [
-                'model_uuid'  => (string) $m['model_uuid'],
-                'name'        => $m['name'] ?? null,
+                'model_uuid' => (string) $m['model_uuid'],
+                'name' => $m['name'] ?? ($namesByUuid[$m['model_uuid']] ?? null),
                 'order_index' => (int) $m['order_index'],
-                'threshold'   => isset($m['threshold']) ? (float) $m['threshold'] : null,
-                'enabled'     => array_key_exists('enabled', $m) ? (bool) $m['enabled'] : true,
+                'threshold' => isset($m['threshold']) ? (float) $m['threshold'] : $DEFAULT_T,
+                'enabled' => array_key_exists('enabled', $m) ? (bool) $m['enabled'] : true,
             ];
         })->sortBy('order_index')->values()->all();
 
         $process = Process::create([
-            'name'              => $data['name'],
-            'status'            => 'pending',
-            'payload'           => $data['payload'] ?? null,
-            'run_at'            => $data['run_at'] ?? null,
-            'default_threshold' => $data['default_threshold'] ?? null,
-            'models'            => $models,
-            'stats'             => [
-                'global'   => ['latency_samples'=>[], 'confidence_sum'=>0, 'confidence_count'=>0],
+            'name' => $data['name'],
+            'status' => 'pending',
+            'payload' => $data['payload'] ?? null,
+            'run_at' => $data['run_at'] ?? null,
+            'default_threshold' => $data['default_threshold'] ?? $DEFAULT_T,
+            'models' => $models,
+            'stats' => [
+                'global' => ['latency_samples' => [], 'confidence_sum' => 0, 'confidence_count' => 0],
                 'by_model' => new \stdClass(),
             ],
-            'total_images'      => 0,
-            'positives'         => 0,
-            'negatives'         => 0,
+            'total_images' => 0,
+            'positives' => 0,
+            'negatives' => 0,
         ]);
 
-        return response()->json($process, Response::HTTP_CREATED);
+        // Respuesta API
+        if ($request->expectsJson() || $request->wantsJson() || $request->is('api/*')) {
+            return response()->json($process, Response::HTTP_CREATED);
+        }
+
+        // Respuesta WEB
+        return redirect()->route('processes.index')
+            ->with('success', 'Process created successfully.');
     }
+
 
     /** SHOW: GET /api/processes/{process} */
     public function show(Process $process)
@@ -82,31 +122,31 @@ class ProcessController extends Controller
     public function update(Request $request, Process $process)
     {
         $data = $request->validate([
-            'name'                  => ['sometimes','string','max:255'],
-            'status'                => ['sometimes','string','in:pending,running,succeeded,failed,canceled'],
-            'payload'               => ['sometimes','nullable','array'],
-            'run_at'                => ['sometimes','nullable','date'],
-            'started_at'            => ['sometimes','nullable','date'],
-            'finished_at'           => ['sometimes','nullable','date'],
-            'error_message'         => ['sometimes','nullable','string','max:1000'],
-            'default_threshold'     => ['sometimes','nullable','numeric','between:0,1'],
+            'name' => ['sometimes', 'string', 'max:255'],
+            'status' => ['sometimes', 'string', 'in:pending,running,succeeded,failed,canceled'],
+            'payload' => ['sometimes', 'nullable', 'array'],
+            'run_at' => ['sometimes', 'nullable', 'date'],
+            'started_at' => ['sometimes', 'nullable', 'date'],
+            'finished_at' => ['sometimes', 'nullable', 'date'],
+            'error_message' => ['sometimes', 'nullable', 'string', 'max:1000'],
+            'default_threshold' => ['sometimes', 'nullable', 'numeric', 'between:0,1'],
 
-            'models'                => ['sometimes','array','min:1'],
-            'models.*.model_uuid'   => ['required_with:models','uuid'],
-            'models.*.name'         => ['nullable','string','max:255'],
-            'models.*.order_index'  => ['required_with:models','integer','min:1'],
-            'models.*.threshold'    => ['nullable','numeric','between:0,1'],
-            'models.*.enabled'      => ['sometimes','boolean'],
+            'models' => ['sometimes', 'array', 'min:1'],
+            'models.*.model_uuid' => ['required_with:models', 'uuid'],
+            'models.*.name' => ['nullable', 'string', 'max:255'],
+            'models.*.order_index' => ['required_with:models', 'integer', 'min:1'],
+            'models.*.threshold' => ['nullable', 'numeric', 'between:0,1'],
+            'models.*.enabled' => ['sometimes', 'boolean'],
         ]);
 
         if (array_key_exists('models', $data)) {
             $data['models'] = collect($data['models'])->map(function ($m) {
                 return [
-                    'model_uuid'  => (string) $m['model_uuid'],
-                    'name'        => $m['name'] ?? null,
+                    'model_uuid' => (string) $m['model_uuid'],
+                    'name' => $m['name'] ?? null,
                     'order_index' => (int) $m['order_index'],
-                    'threshold'   => isset($m['threshold']) ? (float) $m['threshold'] : null,
-                    'enabled'     => array_key_exists('enabled', $m) ? (bool) $m['enabled'] : true,
+                    'threshold' => isset($m['threshold']) ? (float) $m['threshold'] : null,
+                    'enabled' => array_key_exists('enabled', $m) ? (bool) $m['enabled'] : true,
                 ];
             })->sortBy('order_index')->values()->all();
         }
@@ -134,10 +174,10 @@ class ProcessController extends Controller
     public function validateAndUpdate(Request $request, Process $process)
     {
         $request->validate([
-            'image'       => ['required','file','image','max:8192'], // 8MB
-            'camera_id'   => ['nullable','string','max:255'],
-            'model_uuid'  => ['sometimes','uuid'],
-            'model_order' => ['sometimes','integer','min:1'],
+            'image' => ['required', 'file', 'image', 'max:8192'], // 8MB
+            'camera_id' => ['nullable', 'string', 'max:255'],
+            'model_uuid' => ['sometimes', 'uuid'],
+            'model_order' => ['sometimes', 'integer', 'min:1'],
         ]);
 
         // 1) Guardar imagen (auditoría)
@@ -145,19 +185,19 @@ class ProcessController extends Controller
         if (!$request->hasFile('image') || !$file->isValid()) {
             return response()->json([
                 'message' => 'Upload failed',
-                'code'    => $file?->getError(),
-                'detail'  => $file?->getErrorMessage(),
+                'code' => $file?->getError(),
+                'detail' => $file?->getErrorMessage(),
             ], 422);
         }
 
         Storage::makeDirectory("public/processes/{$process->id}");
         $storedPath = $file->store("public/processes/{$process->id}");
-        $absPath    = Storage::path($storedPath);
+        $absPath = Storage::path($storedPath);
         if (!is_file($absPath)) {
             Log::warning('Stored image not found; fallback to temp path', [
                 'storedPath' => $storedPath,
-                'absPath'    => $absPath,
-                'tmp'        => $file->getRealPath(),
+                'absPath' => $absPath,
+                'tmp' => $file->getRealPath(),
             ]);
             $absPath = $file->getRealPath();
         }
@@ -169,7 +209,7 @@ class ProcessController extends Controller
         if ($uuid = $request->input('model_uuid')) {
             $target = $models->firstWhere('model_uuid', $uuid);
         } elseif ($order = $request->input('model_order')) {
-            $target = $models->firstWhere('order_index', (int)$order);
+            $target = $models->firstWhere('order_index', (int) $order);
         } else {
             $target = $models->sortBy('order_index')->first(function ($m) {
                 return !isset($m['enabled']) || $m['enabled'] !== false;
@@ -179,7 +219,7 @@ class ProcessController extends Controller
         if (!$target) {
             return response()->json([
                 'message' => 'Target model not found in process',
-                'errors'  => ['model' => ['Invalid model_uuid/model_order or no enabled models.']],
+                'errors' => ['model' => ['Invalid model_uuid/model_order or no enabled models.']],
             ], 422);
         }
 
@@ -188,34 +228,36 @@ class ProcessController extends Controller
             $this->mergeModelStats($process, $target['model_uuid'], null, null, 0, false, 'skipped');
             $process->last_request = [
                 'received_at' => now()->toISOString(),
-                'image_name'  => $file->getClientOriginalName(),
-                'camera_id'   => $request->input('camera_id'),
-                'results'     => [[
-                    'model_uuid' => $target['model_uuid'],
-                    'approved'   => null,
-                    'confidence' => null,
-                    'threshold'  => $target['threshold'] ?? $process->default_threshold ?? null,
-                    'latency_ms' => 0,
-                    'request_id' => null,
-                    'skipped'    => true,
-                    'reason'     => 'disabled',
-                ]],
+                'image_name' => $file->getClientOriginalName(),
+                'camera_id' => $request->input('camera_id'),
+                'results' => [
+                    [
+                        'model_uuid' => $target['model_uuid'],
+                        'approved' => null,
+                        'confidence' => null,
+                        'threshold' => $target['threshold'] ?? $process->default_threshold ?? null,
+                        'latency_ms' => 0,
+                        'request_id' => null,
+                        'skipped' => true,
+                        'reason' => 'disabled',
+                    ]
+                ],
             ];
             $process->total_images = (int) $process->total_images + 1;
             $process->save();
 
             return response()->json([
-                'process'     => [
-                    'id'               => $process->id,
-                    'total_images'     => $process->total_images,
-                    'positives'        => $process->positives,
-                    'negatives'        => $process->negatives,
-                    'avg_confidence'   => $process->avg_confidence,
-                    'avg_latency_ms'   => $process->avg_latency_ms,
-                    'p95_latency_ms'   => $process->p95_latency_ms,
-                    'max_latency_ms'   => $process->max_latency_ms,
+                'process' => [
+                    'id' => $process->id,
+                    'total_images' => $process->total_images,
+                    'positives' => $process->positives,
+                    'negatives' => $process->negatives,
+                    'avg_confidence' => $process->avg_confidence,
+                    'avg_latency_ms' => $process->avg_latency_ms,
+                    'p95_latency_ms' => $process->p95_latency_ms,
+                    'max_latency_ms' => $process->max_latency_ms,
                 ],
-                'per_model'    => $this->buildPerModelSnapshot($process),
+                'per_model' => $this->buildPerModelSnapshot($process),
                 'last_request' => $process->last_request,
             ], 409); // Conflict: el modelo está deshabilitado
         }
@@ -229,10 +271,10 @@ class ProcessController extends Controller
         $multipart = [
             ['name' => 'uuid', 'contents' => $target['model_uuid']],
             [
-                'name'     => 'image',
+                'name' => 'image',
                 'contents' => fopen($absPath, 'r'),
                 'filename' => $file->getClientOriginalName(),
-                'headers'  => ['Content-Type' => $file->getMimeType() ?: 'application/octet-stream'],
+                'headers' => ['Content-Type' => $file->getMimeType() ?: 'application/octet-stream'],
             ],
         ];
 
@@ -247,24 +289,24 @@ class ProcessController extends Controller
 
             $result = [
                 'model_uuid' => $target['model_uuid'],
-                'approved'   => null,
+                'approved' => null,
                 'confidence' => null,
-                'threshold'  => $threshold,
+                'threshold' => $threshold,
                 'latency_ms' => $latencyMs,
                 'request_id' => null,
-                'error'      => 'network_error: '.$e->getMessage(),
+                'error' => 'network_error: ' . $e->getMessage(),
             ];
             return $this->finalizeSingleResult($process, $file, $request->input('camera_id'), $result);
         }
         $latencyMs = (int) round((hrtime(true) - $t0) / 1e6);
 
-        $status  = $res->getStatusCode();
+        $status = $res->getStatusCode();
         $bodyRaw = (string) $res->getBody();
-        $body    = json_decode($bodyRaw, true);
+        $body = json_decode($bodyRaw, true);
 
         // 6) Manejo de errores / modelo no entrenado → skipped: untrained
         $isUntrained = false;
-        $msg = strtolower((string)($body['message'] ?? $bodyRaw));
+        $msg = strtolower((string) ($body['message'] ?? $bodyRaw));
         if (
             ($status === 404 || $status === 500) &&
             (str_contains($msg, 'artifact not found') || str_contains($msg, 'artifacts') || str_contains($msg, 'missing'))
@@ -276,27 +318,27 @@ class ProcessController extends Controller
             if ($isUntrained) {
                 $this->mergeModelStats($process, $target['model_uuid'], null, null, $latencyMs, false, 'skipped');
                 $result = [
-                    'model_uuid'   => $target['model_uuid'],
-                    'approved'     => null,
-                    'confidence'   => null,
-                    'threshold'    => $threshold,
-                    'latency_ms'   => $latencyMs,
-                    'request_id'   => $body['request_id'] ?? null,
-                    'skipped'      => true,
-                    'reason'       => 'untrained',
-                    'error'        => "HTTP {$status}",
+                    'model_uuid' => $target['model_uuid'],
+                    'approved' => null,
+                    'confidence' => null,
+                    'threshold' => $threshold,
+                    'latency_ms' => $latencyMs,
+                    'request_id' => $body['request_id'] ?? null,
+                    'skipped' => true,
+                    'reason' => 'untrained',
+                    'error' => "HTTP {$status}",
                     'error_detail' => $body['message'] ?? substr($bodyRaw, 0, 300),
                 ];
             } else {
                 $this->mergeModelStats($process, $target['model_uuid'], null, null, $latencyMs, false, 'error');
                 $result = [
-                    'model_uuid'   => $target['model_uuid'],
-                    'approved'     => null,
-                    'confidence'   => null,
-                    'threshold'    => $threshold,
-                    'latency_ms'   => $latencyMs,
-                    'request_id'   => $body['request_id'] ?? null,
-                    'error'        => "HTTP {$status}",
+                    'model_uuid' => $target['model_uuid'],
+                    'approved' => null,
+                    'confidence' => null,
+                    'threshold' => $threshold,
+                    'latency_ms' => $latencyMs,
+                    'request_id' => $body['request_id'] ?? null,
+                    'error' => "HTTP {$status}",
                     'error_detail' => $body['message'] ?? substr($bodyRaw, 0, 300),
                 ];
             }
@@ -305,19 +347,23 @@ class ProcessController extends Controller
 
         // 7) Payload real: { prediction, confidence }
         $prediction = $body['prediction'] ?? null; // "approved"|"rejected"
-        $approved   = $prediction !== null ? ($prediction === 'approved') : (bool)($body['approved'] ?? false);
-        $confidence = isset($body['confidence']) ? (float)$body['confidence'] : null;
-        $requestId  = $body['request_id'] ?? null;
+        $approved = $prediction !== null ? ($prediction === 'approved') : (bool) ($body['approved'] ?? false);
+        $confidence = isset($body['confidence']) ? (float) $body['confidence'] : null;
+        $requestId = $body['request_id'] ?? null;
 
-        if ($approved === true)  { $process->positives += 1; }
-        if ($approved === false) { $process->negatives += 1; }
+        if ($approved === true) {
+            $process->positives += 1;
+        }
+        if ($approved === false) {
+            $process->negatives += 1;
+        }
         $this->mergeModelStats($process, $target['model_uuid'], $confidence, $approved, $latencyMs, true, null);
 
         $result = [
             'model_uuid' => $target['model_uuid'],
-            'approved'   => $approved,
+            'approved' => $approved,
             'confidence' => $confidence,
-            'threshold'  => $threshold,
+            'threshold' => $threshold,
             'latency_ms' => $latencyMs,
             'request_id' => $requestId,
         ];
@@ -331,22 +377,22 @@ class ProcessController extends Controller
         $perModel = $this->buildPerModelSnapshot($process);
 
         $inferTotal = array_sum(array_map(fn($m) => $m['inferences'], $perModel));
-        $posTotal   = array_sum(array_map(fn($m) => $m['positives'],  $perModel));
-        $negTotal   = array_sum(array_map(fn($m) => $m['negatives'],  $perModel));
+        $posTotal = array_sum(array_map(fn($m) => $m['positives'], $perModel));
+        $negTotal = array_sum(array_map(fn($m) => $m['negatives'], $perModel));
 
         return response()->json([
             'global' => [
-                'total_images'     => (int) $process->total_images,
+                'total_images' => (int) $process->total_images,
                 'inferences_total' => (int) $inferTotal,
-                'positives'        => (int) $posTotal,
-                'negatives'        => (int) $negTotal,
-                'positive_rate'    => $inferTotal ? round($posTotal / $inferTotal, 4) : null,
-                'avg_confidence'   => $process->avg_confidence,
-                'avg_latency_ms'   => $process->avg_latency_ms,
-                'p95_latency_ms'   => $process->p95_latency_ms,
-                'max_latency_ms'   => $process->max_latency_ms,
+                'positives' => (int) $posTotal,
+                'negatives' => (int) $negTotal,
+                'positive_rate' => $inferTotal ? round($posTotal / $inferTotal, 4) : null,
+                'avg_confidence' => $process->avg_confidence,
+                'avg_latency_ms' => $process->avg_latency_ms,
+                'p95_latency_ms' => $process->p95_latency_ms,
+                'max_latency_ms' => $process->max_latency_ms,
             ],
-            'models'       => $perModel,
+            'models' => $perModel,
             'last_request' => $process->last_request,
         ]);
     }
@@ -356,7 +402,7 @@ class ProcessController extends Controller
     protected function buildPerModelSnapshot(Process $process): array
     {
         $models = collect($process->models ?? [])->keyBy('model_uuid');
-        $by     = $process->stats['by_model'] ?? [];
+        $by = $process->stats['by_model'] ?? [];
 
         $out = [];
         foreach ($by as $uuid => $m) {
@@ -372,28 +418,28 @@ class ProcessController extends Controller
                 sort($lat);
                 $avgLat = (int) round(array_sum($lat) / count($lat));
                 $maxLat = (int) max($lat);
-                $p95    = (int) $lat[(int) floor(0.95 * (count($lat) - 1))];
+                $p95 = (int) $lat[(int) floor(0.95 * (count($lat) - 1))];
             }
 
             $out[] = [
-                'model_uuid'      => $uuid,
-                'model_name'      => $name,
-                'order_index'     => (int)($models->get($uuid)['order_index'] ?? 0),
-                'threshold'       => $models->get($uuid)['threshold'] ?? null,
-                'inferences'      => (int)($m['inferences'] ?? 0),
-                'positives'       => (int)($m['positives']  ?? 0),
-                'negatives'       => (int)($m['negatives']  ?? 0),
-                'skipped'         => (int)($m['skipped']    ?? 0),
-                'errors'          => (int)($m['errors']     ?? 0),
-                'positive_rate'   => ($m['inferences'] ?? 0) ? round(($m['positives'] ?? 0) / $m['inferences'], 4) : null,
-                'avg_confidence'  => $avgConf,
-                'avg_latency_ms'  => $avgLat,
-                'p95_latency_ms'  => $p95,
-                'max_latency_ms'  => $maxLat,
+                'model_uuid' => $uuid,
+                'model_name' => $name,
+                'order_index' => (int) ($models->get($uuid)['order_index'] ?? 0),
+                'threshold' => $models->get($uuid)['threshold'] ?? null,
+                'inferences' => (int) ($m['inferences'] ?? 0),
+                'positives' => (int) ($m['positives'] ?? 0),
+                'negatives' => (int) ($m['negatives'] ?? 0),
+                'skipped' => (int) ($m['skipped'] ?? 0),
+                'errors' => (int) ($m['errors'] ?? 0),
+                'positive_rate' => ($m['inferences'] ?? 0) ? round(($m['positives'] ?? 0) / $m['inferences'], 4) : null,
+                'avg_confidence' => $avgConf,
+                'avg_latency_ms' => $avgLat,
+                'p95_latency_ms' => $p95,
+                'max_latency_ms' => $maxLat,
             ];
         }
 
-        usort($out, fn($a,$b) => ($a['order_index'] <=> $b['order_index']));
+        usort($out, fn($a, $b) => ($a['order_index'] <=> $b['order_index']));
         return $out;
     }
 
@@ -409,33 +455,45 @@ class ProcessController extends Controller
         $stats = $process->stats ?? [];
 
         // Global
-        $stats['global'] = $stats['global'] ?? ['latency_samples'=>[], 'confidence_sum'=>0, 'confidence_count'=>0];
+        $stats['global'] = $stats['global'] ?? ['latency_samples' => [], 'confidence_sum' => 0, 'confidence_count' => 0];
         if ($latencyMs !== null && $latencyMs > 0) {
             $this->pushSample($stats['global']['latency_samples'], $latencyMs, 200);
         }
         if ($confidence !== null) {
-            $stats['global']['confidence_sum']   += $confidence;
+            $stats['global']['confidence_sum'] += $confidence;
             $stats['global']['confidence_count'] += 1;
         }
 
         // Por modelo
         $stats['by_model'] = $stats['by_model'] ?? [];
         $m = $stats['by_model'][$modelUuid] ?? [
-            'inferences'=>0,'positives'=>0,'negatives'=>0,
-            'confidence_sum'=>0,'confidence_count'=>0,
-            'latency_samples'=>[],
-            'skipped'=>0,'errors'=>0,
+            'inferences' => 0,
+            'positives' => 0,
+            'negatives' => 0,
+            'confidence_sum' => 0,
+            'confidence_count' => 0,
+            'latency_samples' => [],
+            'skipped' => 0,
+            'errors' => 0,
         ];
 
-        if ($flag === 'skipped') { $m['skipped']++; }
-        if ($flag === 'error')   { $m['errors']++;  }
+        if ($flag === 'skipped') {
+            $m['skipped']++;
+        }
+        if ($flag === 'error') {
+            $m['errors']++;
+        }
 
         if ($countAsInference && $approved !== null) {
             $m['inferences'] += 1;
-            if ($approved === true)  { $m['positives'] += 1; }
-            if ($approved === false) { $m['negatives'] += 1; }
+            if ($approved === true) {
+                $m['positives'] += 1;
+            }
+            if ($approved === false) {
+                $m['negatives'] += 1;
+            }
             if ($confidence !== null) {
-                $m['confidence_sum']   += $confidence;
+                $m['confidence_sum'] += $confidence;
                 $m['confidence_count'] += 1;
             }
         }
@@ -451,7 +509,8 @@ class ProcessController extends Controller
     protected function pushSample(array &$samples, int $val, int $maxLen): void
     {
         $samples[] = $val;
-        if (count($samples) > $maxLen) array_shift($samples);
+        if (count($samples) > $maxLen)
+            array_shift($samples);
     }
 
     /** ==== Guzzle helpers ==== */
@@ -463,10 +522,10 @@ class ProcessController extends Controller
         }
 
         return new Client([
-            'base_uri'    => $base . '/',
-            'timeout'     => (int) env('INFERENCE_API_TIMEOUT', 25),
+            'base_uri' => $base . '/',
+            'timeout' => (int) env('INFERENCE_API_TIMEOUT', 25),
             'http_errors' => false,
-            'verify'      => filter_var(env('INFERENCE_TLS_VERIFY', 'true'), FILTER_VALIDATE_BOOLEAN),
+            'verify' => filter_var(env('INFERENCE_TLS_VERIFY', 'true'), FILTER_VALIDATE_BOOLEAN),
         ]);
     }
 
@@ -495,7 +554,7 @@ class ProcessController extends Controller
 
         // Recalcular agregados globales
         $stats = $process->stats ?? [];
-        $g     = $stats['global'] ?? ['latency_samples'=>[], 'confidence_sum'=>0, 'confidence_count'=>0];
+        $g = $stats['global'] ?? ['latency_samples' => [], 'confidence_sum' => 0, 'confidence_count' => 0];
 
         $process->avg_confidence = $g['confidence_count'] > 0
             ? round($g['confidence_sum'] / $g['confidence_count'], 4)
@@ -514,25 +573,25 @@ class ProcessController extends Controller
 
         $process->last_request = [
             'received_at' => now()->toISOString(),
-            'image_name'  => $file->getClientOriginalName(),
-            'camera_id'   => $cameraId,
-            'results'     => [$result],
+            'image_name' => $file->getClientOriginalName(),
+            'camera_id' => $cameraId,
+            'results' => [$result],
         ];
 
         $process->save();
 
         return response()->json([
-            'process'     => [
-                'id'               => $process->id,
-                'total_images'     => $process->total_images,
-                'positives'        => $process->positives,
-                'negatives'        => $process->negatives,
-                'avg_confidence'   => $process->avg_confidence,
-                'avg_latency_ms'   => $process->avg_latency_ms,
-                'p95_latency_ms'   => $process->p95_latency_ms,
-                'max_latency_ms'   => $process->max_latency_ms,
+            'process' => [
+                'id' => $process->id,
+                'total_images' => $process->total_images,
+                'positives' => $process->positives,
+                'negatives' => $process->negatives,
+                'avg_confidence' => $process->avg_confidence,
+                'avg_latency_ms' => $process->avg_latency_ms,
+                'p95_latency_ms' => $process->p95_latency_ms,
+                'max_latency_ms' => $process->max_latency_ms,
             ],
-            'per_model'    => $this->buildPerModelSnapshot($process),
+            'per_model' => $this->buildPerModelSnapshot($process),
             'last_request' => $process->last_request,
         ]);
     }

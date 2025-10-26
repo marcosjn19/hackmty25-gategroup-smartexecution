@@ -137,13 +137,15 @@
                         </a>
                     </li>
 
-                    <!-- Processes (placeholder) -->
                     <li>
-                        <a href="#" class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform text-gray-700 hover:text-etagate-orange hover:bg-gray-50">
+                        <a href="{{ route('processes.index') }}"
+                            class="w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-300 group transform
+       {{ request()->routeIs('processes.*') ? 'bg-gradient-to-r from-etagate-orange to-orange-600 text-white shadow-lg scale-105' : 'text-gray-700 hover:text-etagate-orange hover:bg-gray-50' }}">
                             <div
-                                class="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 bg-gray-100 group-hover:bg-etagate-orange group-hover:bg-opacity-10">
-                                <svg class="w-5 h-5 text-gray-600 group-hover:text-etagate-orange" fill="none"
-                                    stroke="currentColor" viewBox="0 0 24 24">
+                                class="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300
+            {{ request()->routeIs('processes.*') ? 'bg-white bg-opacity-20' : 'bg-gray-100 group-hover:bg-etagate-orange group-hover:bg-opacity-10' }}">
+                                <svg class="w-5 h-5 {{ request()->routeIs('processes.*') ? 'text-white' : 'text-gray-600 group-hover:text-etagate-orange' }}"
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                                 </svg>
@@ -197,7 +199,8 @@
                         </div>
                     </div>
 
-                    <button class="px-6 py-2.5 bg-gradient-to-r from-etagate-orange to-orange-600 text-white font-semibold rounded-full hover:shadow-lg transform hover:scale-105 transition-all duration-300">
+                    <button
+                        class="px-6 py-2.5 bg-gradient-to-r from-etagate-orange to-orange-600 text-white font-semibold rounded-full hover:shadow-lg transform hover:scale-105 transition-all duration-300">
                         Get Started
                     </button>
                 </div>

@@ -1,5 +1,6 @@
 import './bootstrap';
 import modelCard from './model.js';
+import './processes-index.js';
 import Alpine from 'alpinejs';
 
 // Voice assistant (como ya lo tenías)
