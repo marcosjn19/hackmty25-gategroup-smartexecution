@@ -5,6 +5,8 @@ use App\Http\Controllers\ModelController;
 use App\Http\Controllers\VoiceAssistantController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
+use App\Http\Controllers\ProcessController;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 
 // Home → Dashboard público
 Route::get('/', fn() => redirect()->route('dashboard'));
@@ -54,3 +56,27 @@ Route::prefix('api')->group(function () {
 });
 Route::post('/models/{model}/samples', [ModelController::class, 'storeSamples'])->name('models.samples.store');
 Route::post('/models/{model}/train', [ModelController::class, 'train'])->name('models.train');
+
+
+// === API pública para Processes (sin auth, sin CSRF) ===
+Route::prefix('api')
+    ->middleware('api') // usa el stack de API (sin sesión)
+    ->withoutMiddleware([VerifyCsrfToken::class]) // desactiva CSRF sólo aquí
+    ->group(function () {
+        Route::apiResource('processes', ProcessController::class);
+        Route::get('processes/{process}/insights', [ProcessController::class, 'insights']);
+        Route::post('processes/{process}/validate', [\App\Http\Controllers\ProcessController::class, 'validateAndUpdate']);
+
+
+        Route::get('probe/php-ini', function () {
+    return response()->json([
+        'upload_max_filesize' => ini_get('upload_max_filesize'),
+        'post_max_size'       => ini_get('post_max_size'),
+        'upload_tmp_dir'      => ini_get('upload_tmp_dir') ?: sys_get_temp_dir(),
+        'user_ini_filename'   => ini_get('user_ini.filename'),
+        'sapi'                => php_sapi_name(),
+    ]);
+});
+    });
+
+
