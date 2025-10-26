@@ -1,3 +1,20 @@
+```md
+# MLH Challenges
+
+## 1. Gemini (Intro to Gemini AI Studio)
+
+Gemini AI Studio was fundamental to our voice interaction system. It powers our voice-to-text conversion, allowing us to understand natural human language and user intent with remarkable accuracy. This understanding enables our backend to intelligently process requests and activate the right processes or return relevant data insights. Without Gemini's language comprehension capabilities, our hands-free experience wouldn't be possible, and we couldn't reduce the human errors that plague operational workflows.
+
+## 2. Use of ElevenLabs
+
+ElevenLabs transformed our user experience. Their high-quality AI voices and assistants gave life to "Sibis," our voice assistant, making interactions feel natural and professional. The voice quality was crucial for noisy operational environments where clarity matters. Beyond the platform, ElevenLabs voices elevated our presentation video, delivering the emotional impact and professional polish our story deserved. Their technology made our vision of truly hands-free operations a reality.
+
+## 3. Free .Tech Domain Name
+
+**etagate.tech** perfectly captures our identity as a palindrome. Just as our domain reads meaningfully in both directions, our platform solves bidirectionally: from the general to the specific and from the specific to the general. The .tech domain immediately communicates our technological approach while the palindrome reinforces our philosophy: we don't solve one specific problem; we solve the problem that gives solutions to infinite problems.
+
+---
+
 # etagate
 
 **AI-Powered Operational Intelligence Platform**
@@ -80,8 +97,8 @@ Create a model once and apply it across multiple processes. Need to verify tray 
 - **Python** - Core processing
 - **Flask** - API framework
 - **OpenCV** - Image analysis
-- **Gemini AI** - Model generation
-- **ElevenLabs** - Voice assistant
+- **Gemini AI** - Model generation and voice-to-text conversion
+- **ElevenLabs** - Voice assistant and text-to-speech
 
 ### Scalability
 
@@ -143,7 +160,7 @@ etagate combines:
 
 ## Try It Out
 
-- **Live Demo:** [https://hackmty25-gategroup-smartexecution-production.up.railway.app](https://hackmty25-gategroup-smartexecution-production.up.railway.app)
+
 - **Website:** [etagate.tech](https://etagate.tech)
 - **GitHub Repository:** [View Code](#)
 
@@ -172,7 +189,5 @@ Developed by:
 
 ---
 
-
----
-
 **etagate** - From the general to the specific, from the specific to the general. Detecting solutions to problems, one process at a time.
+```
